@@ -1,0 +1,207 @@
+// Observation encoder: GameState -> flat float tensor from current-player POV.
+//
+// Layout (offsets are documented in comments below; OBS_SIZE in obs.hpp).
+//   Per-player block (4 players, in relative seat order: self, +1, +2, +3)
+//     16 floats each = 64 floats
+//   Self private (resources, dev cards, dev_card_played flag) = 16 floats
+//   Board (node, edge, hex, port, robber)
+//   Game state (phase, flag, dice, bank, dev_deck, awards, ...)
+//   Trade scratch (proposer, give, want, responses)
+#include "obs.hpp"
+#include "topology.hpp"
+#include <cassert>
+
+namespace catan {
+
+namespace {
+
+// Normalization divisors — structural Catan maxima, baked into the frozen obs
+// so every consumer sees ~[0,1] inputs. MUST stay in sync with
+// bridge/obs_encoder.py (catanatron eval path) and ui/obs_decoder.py.
+// Occasional values may exceed 1 (e.g. handsize after a monopoly); that is fine
+// for an MLP — the goal is comparable scale, not a hard bound.
+namespace norm {
+constexpr float VP        = 10.0f;  // win at 10
+constexpr float HAND      = 25.0f;  // hand can spike past 20 on a monopoly
+constexpr float DEV       = 10.0f;  // hidden dev cards held / bought
+constexpr float KNIGHTS   = 10.0f;
+constexpr float ROADLEN   = 15.0f;  // 15 road pieces
+constexpr float SETTLE    = 5.0f;   // settlements available (starts 5)
+constexpr float CITY      = 4.0f;   // cities available (starts 4)
+constexpr float ROAD      = 15.0f;  // roads available (starts 15)
+constexpr float DISCARD   = 10.0f;  // cards owed on a 7
+constexpr float RES       = 19.0f;  // per-resource bank cap
+constexpr float BANK      = 19.0f;
+constexpr float DEVDECK   = 25.0f;  // full dev deck size
+constexpr float FREEROADS = 2.0f;   // road-building grants up to 2
+constexpr float TRADE     = 19.0f;  // trade bundle counts (resource-bounded)
+}  // namespace norm
+
+inline uint8_t relseat(uint8_t self, uint8_t player) noexcept {
+    return uint8_t((player + NUM_PLAYERS - self) & 0x3);
+}
+
+struct Writer {
+    float* p;
+    inline void put(float v) noexcept { *p++ = v; }
+    inline void zero(int n) noexcept { for (int i = 0; i < n; ++i) *p++ = 0.0f; }
+    // One-hot of size `n`. idx in [0, n) sets that slot to 1; others 0.
+    // If idx >= n (e.g., sentinel), all slots stay 0.
+    inline void onehot(int idx, int n) noexcept {
+        for (int i = 0; i < n; ++i) *p++ = (i == idx) ? 1.0f : 0.0f;
+    }
+};
+
+// Per-player slot layout (16 floats):
+// [vp, handsize, total_dev, knights_played, road_length,
+//  settle_left, city_left, road_left,
+//  ports[0..5] (6 floats),
+//  discard_remaining, is_current]
+inline void encode_player(Writer& w, const GameState& s, uint8_t pl,
+                           bool is_self) noexcept {
+    // VP: total for self (private), public-only for opponents.
+    w.put(float(is_self ? s.player_vp[pl] : s.player_vp_without_dev[pl]) / norm::VP);
+    w.put(float(s.player_handsize[pl])         / norm::HAND);
+    w.put(float(s.player_total_dev[pl])        / norm::DEV);
+    w.put(float(s.player_knights_played[pl])   / norm::KNIGHTS);
+    w.put(float(s.player_road_length[pl])      / norm::ROADLEN);
+    w.put(float(s.player_settlement_count[pl]) / norm::SETTLE);
+    w.put(float(s.player_city_count[pl])       / norm::CITY);
+    w.put(float(s.player_road_count[pl])       / norm::ROAD);
+    uint8_t ports = s.player_ports[pl];
+    for (int b = 0; b < 6; ++b) w.put(float((ports >> b) & 1));  // already 0/1
+    w.put(float(s.player_discard_remaining[pl]) / norm::DISCARD);
+    w.put(float(s.current_player == pl ? 1 : 0));                // already 0/1
+}
+
+}  // namespace
+
+void write_obs(const GameState& s, const BoardLayout& b,
+               uint8_t self, float* out) noexcept {
+    Writer w{out};
+
+    // ----- Per-player blocks in relative-seat order: self, +1, +2, +3 -----
+    for (uint8_t rel = 0; rel < NUM_PLAYERS; ++rel) {
+        uint8_t pl = uint8_t((self + rel) & 0x3);
+        encode_player(w, s, pl, /*is_self=*/(rel == 0));
+    }
+
+    // ----- Self private -----
+    for (uint8_t r = 0; r < NUM_RESOURCES; ++r) w.put(float(s.player_resources[self][r]) / norm::RES);
+    for (uint8_t d = 0; d < 5; ++d)             w.put(float(s.player_dev[self][d]) / norm::DEV);
+    for (uint8_t d = 0; d < 5; ++d)             w.put(float(s.player_dev_bought_this_turn[self][d]) / norm::DEV);
+    w.put(float(s.dev_card_played ? 1 : 0));  // already 0/1
+
+    // ----- Board: nodes (8 channels per node, in relseat order) -----
+    // [self_settle, self_city, opp+1_settle, opp+1_city,
+    //  opp+2_settle, opp+2_city, opp+3_settle, opp+3_city]
+    for (uint8_t n = 0; n < topology::NUM_NODES; ++n) {
+        uint8_t nb = s.node[n];
+        uint8_t lvl = node_level(nb);
+        if (lvl == NODE_EMPTY) {
+            w.zero(2 * NUM_PLAYERS);
+            continue;
+        }
+        uint8_t rel = relseat(self, node_owner(nb));
+        bool is_settle = (lvl == NODE_SETTLEMENT);
+        bool is_city   = (lvl == NODE_CITY);
+        for (uint8_t r = 0; r < NUM_PLAYERS; ++r) {
+            w.put((r == rel && is_settle) ? 1.0f : 0.0f);
+            w.put((r == rel && is_city)   ? 1.0f : 0.0f);
+        }
+    }
+
+    // ----- Board: edges (4 channels per edge, in relseat order) -----
+    // [self_road, opp+1_road, opp+2_road, opp+3_road]
+    for (uint8_t e = 0; e < topology::NUM_EDGES; ++e) {
+        uint8_t owner = s.edge[e];
+        if (owner == NO_PLAYER) {
+            w.zero(NUM_PLAYERS);
+            continue;
+        }
+        uint8_t rel = relseat(self, owner);
+        for (uint8_t r = 0; r < NUM_PLAYERS; ++r) {
+            w.put(r == rel ? 1.0f : 0.0f);
+        }
+    }
+
+    // ----- Hex resource (one-hot 6 per hex) -----
+    for (uint8_t h = 0; h < topology::NUM_HEXES; ++h) {
+        w.onehot(b.hex_resource[h], 6);
+    }
+
+    // ----- Hex number (normalized by 12) -----
+    for (uint8_t h = 0; h < topology::NUM_HEXES; ++h) {
+        w.put(float(b.hex_number[h]) / 12.0f);
+    }
+
+    // ----- Port types (one-hot 6 per port) -----
+    for (uint8_t pt = 0; pt < topology::NUM_PORTS; ++pt) {
+        w.onehot(b.port_type[pt], 6);
+    }
+
+    // ----- Robber hex one-hot -----
+    w.onehot(int(s.robber_hex), int(topology::NUM_HEXES));
+
+    // ----- Game state -----
+    w.onehot(int(s.phase), 4);                    // 4 phase values
+    w.onehot(int(s.flag),  8);                    // 8 flag values
+    // dice_roll one-hot over 13 slots (0 = not rolled, 2..12 valid)
+    w.onehot(int(s.dice_roll), 13);
+    w.put(float(s.turn_count) / 400.0f);          // normalized turn count
+    for (uint8_t r = 0; r < NUM_RESOURCES; ++r) w.put(float(s.bank[r]) / norm::BANK);
+    for (uint8_t d = 0; d < 5; ++d)             w.put(float(s.dev_deck[d]) / norm::DEVDECK);
+
+    // longest_road_owner: 5 slots [self, +1, +2, +3, none]
+    if (s.longest_road_owner == NO_PLAYER) w.onehot(4, 5);
+    else                                   w.onehot(int(relseat(self, s.longest_road_owner)), 5);
+
+    // largest_army_owner: same 5-slot encoding
+    if (s.largest_army_owner == NO_PLAYER) w.onehot(4, 5);
+    else                                   w.onehot(int(relseat(self, s.largest_army_owner)), 5);
+
+    // start_player relative
+    w.onehot(int(relseat(self, s.start_player)), 4);
+
+    // free_roads_remaining
+    w.put(float(s.free_roads_remaining) / norm::FREEROADS);
+
+    // ----- Trade scratch -----
+    // trade_proposer: 5 slots [self, +1, +2, +3, none]
+    if (s.trade_proposer == NO_PLAYER) w.onehot(4, 5);
+    else                                w.onehot(int(relseat(self, s.trade_proposer)), 5);
+    // trade_give and trade_want: 5 resource counts each
+    for (uint8_t r = 0; r < NUM_RESOURCES; ++r) w.put(float(s.trade_give[r]) / norm::TRADE);
+    for (uint8_t r = 0; r < NUM_RESOURCES; ++r) w.put(float(s.trade_want[r]) / norm::TRADE);
+
+    // Per-opponent response: 4-slot one-hot [PENDING, ACCEPT, DECLINE, N/A]
+    for (uint8_t rel = 1; rel < NUM_PLAYERS; ++rel) {
+        uint8_t pl = uint8_t((self + rel) & 0x3);
+        uint8_t v = uint8_t((s.trade_response >> (2 * pl)) & 0x3);
+        w.onehot(int(v), 4);
+    }
+
+    assert(w.p == out + OBS_SIZE);
+}
+
+void write_obs_full(const GameState& s, const BoardLayout& b,
+                    uint8_t self, float* out) noexcept {
+    write_obs(s, b, self, out);
+    Writer w{out + OBS_SIZE};
+    // Hidden enemy state, per opponent in relseat order (+1, +2, +3):
+    // exact resources, dev cards held by type, dev bought this turn, and the
+    // VP hidden in unplayed dev cards (vp - vp_without_dev).
+    for (uint8_t rel = 1; rel < NUM_PLAYERS; ++rel) {
+        uint8_t pl = uint8_t((self + rel) & 0x3);
+        for (uint8_t r = 0; r < NUM_RESOURCES; ++r)
+            w.put(float(s.player_resources[pl][r]) / norm::RES);
+        for (uint8_t d = 0; d < 5; ++d)
+            w.put(float(s.player_dev[pl][d]) / norm::DEV);
+        for (uint8_t d = 0; d < 5; ++d)
+            w.put(float(s.player_dev_bought_this_turn[pl][d]) / norm::DEV);
+        w.put(float(s.player_vp[pl] - s.player_vp_without_dev[pl]) / norm::VP);
+    }
+    assert(w.p == out + OBS_FULL_SIZE);
+}
+
+}  // namespace catan

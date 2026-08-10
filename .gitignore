@@ -1,0 +1,34 @@
+# build artifacts
+build/
+dist/
+*.egg-info/
+_deps/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+compile_commands.json
+
+# compiled objects / extensions
+*.o
+*.a
+*.so
+*.dylib
+*.dll
+*.gch
+*.pch
+
+# python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+.pytest_cache/
+
+# editors / os
+.vscode/
+.idea/
+.DS_Store
+*.swp
+*~
+.cache/

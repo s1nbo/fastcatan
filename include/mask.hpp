@@ -1,0 +1,38 @@
+#pragma once
+#include <cstdint>
+#include "state.hpp"
+
+namespace catan {
+
+    // Flat action space upper bound (exclusive). Matches action IDs in rules.hpp.
+    // [0,54)   settlement build at node
+    // [54,108) city build at node
+    // [108,180) road build at edge
+    // 180      ROLL_DICE
+    // 181      END_TURN
+    // [182,187) DISCARD by resource
+    // [187,206) MOVE_ROBBER by hex
+    // [206,210) STEAL by player
+    // [210,235) TRADE (give*5 + get)
+    // 235 Buy Dev
+    // 236 Play Knight
+    // 237 Play Roadbuilding
+    // 238 YOP (25 combinations)
+    // 263 Monopoly
+    // 268 Add to Trade Give
+    // 273 Add to Trade Want
+    // 278 Trade Open
+    // 279 Accept
+    // 280 Decline
+    // 281 Confirm
+    // 285 Cancel
+    inline constexpr uint32_t NUM_ACTIONS = 286;
+
+    // 5 × uint64 = 320 bits. Bit i corresponds to action ID i.
+    inline constexpr uint8_t MASK_WORDS = 5;
+
+    // Compute the legal-action bitmask from the current state.
+    void compute_mask(const GameState& s, const BoardLayout& b,
+                      uint64_t mask[MASK_WORDS]) noexcept;
+
+}  // namespace catan

@@ -18,25 +18,40 @@ repository and consumes this as a pinned dependency.
 
 ## Install
 
-Editable / from source (needs a C++ toolchain + CMake ≥ 3.27):
+From PyPI (prebuilt abi3 wheel, no toolchain needed, CPython 3.12+):
 
 ```bash
-pip install .
+pip install fastcatan
 ```
 
-Pin a frozen version from another project:
+Downstream projects pin an exact version: `fastcatan==1.0.0`.
+
+From source (needs a C++ toolchain + CMake ≥ 3.27) — dev/editable or non-Linux:
 
 ```bash
-pip install "fastcatan @ git+https://<host>/<you>/catan-sim.git@v1.0.0"
+pip install .            # tunes -march=native for THIS machine (fast local build)
 ```
 
-## Build a distributable wheel
+## Publishing to PyPI
+
+Publishing is automated: pushing a version tag (`v1.0.0`) runs
+`.github/workflows/publish.yml`, which builds one **abi3** wheel (nanobind
+`STABLE_ABI` → one wheel serves 3.12/3.13/3.14) plus an sdist via
+[cibuildwheel](https://cibuildwheel.pypa.io) and uploads through PyPI
+**Trusted Publishing** (OIDC, no secrets). One-time setup on PyPI:
+configure the trusted publisher for project `fastcatan` (repo + workflow
+`publish.yml` + environment `pypi`).
+
+The published wheel is built portable (`-march=x86-64-v2`, runs on any 2009+ CPU)
+inside a `manylinux_2_28` container (GCC 12+, required for C++23). Local builds
+keep `-march=native`. Build a wheel by hand:
 
 ```bash
-python -m build --wheel      # -> dist/fastcatan-1.0.0-cp3XX-...whl
+python -m build --wheel                               # native (this CPU)
+python -m build --wheel -Ccmake.define.FASTCATAN_ARCH=x86-64-v2   # portable
 ```
 
-The wheel is platform + Python-version specific (compiled extension).
+Currently **Linux x86_64** only; add macOS/Windows to the CI `archs` matrix later.
 
 ## Test
 

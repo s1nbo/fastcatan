@@ -18,9 +18,22 @@ if(_IPO_SUPPORTED AND CMAKE_BUILD_TYPE STREQUAL "Release")
     set(CMAKE_INTERPROCEDURAL_OPTIMIZATION ON)
 endif()
 
+# Target CPU. "native" = tune for the build machine (fast local/dev builds).
+# For DISTRIBUTED wheels this MUST be a portable baseline, else the wheel emits
+# instructions that SIGILL-crash on other CPUs. The PyPI CI build overrides this
+# to "x86-64-v2" (SSE4.2 + POPCNT, portable to ~any 2009+ CPU). "off" = no -march.
+set(FASTCATAN_ARCH "native" CACHE STRING
+    "Value for -march (native | x86-64-v2 | x86-64-v3 | off)")
+if(FASTCATAN_ARCH STREQUAL "off")
+    set(_FCATAN_ARCH_FLAG "")
+else()
+    set(_FCATAN_ARCH_FLAG "-march=${FASTCATAN_ARCH}")
+endif()
+message(STATUS "fastcatan -march=${FASTCATAN_ARCH}")
+
 # Common flags. Target per PLAN.md: GCC 14.2 + Linux x86_64.
 set(FCATAN_RELEASE_FLAGS
-    -O3 -march=native -fno-exceptions -fno-rtti -Wall -Wextra)
+    -O3 ${_FCATAN_ARCH_FLAG} -fno-exceptions -fno-rtti -Wall -Wextra)
 
 # Core rules library (static; the linker can fold into anything).
 add_library(fastcatan_core STATIC
@@ -102,7 +115,7 @@ if(SKBUILD)
     # Nanobind needs RTTI + exceptions, so DON'T apply our -fno-* flags here.
     # Core library is still built without them; this binding TU compiles
     # with the compiler defaults.
-    target_compile_options(_fastcatan PRIVATE -O3 -march=native)
+    target_compile_options(_fastcatan PRIVATE -O3 ${_FCATAN_ARCH_FLAG})
 
     install(TARGETS _fastcatan LIBRARY DESTINATION fastcatan)
     install(FILES python/fastcatan/__init__.py

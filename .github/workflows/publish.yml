@@ -1,0 +1,53 @@
+name: build & publish
+
+# Build the abi3 wheel + sdist and publish to PyPI on a version tag (v1.0.0, …).
+# Uses PyPI Trusted Publishing (OIDC) — no API token/secret needed once the
+# publisher is configured at https://pypi.org/manage/project/fastcatan/settings/publishing/
+# workflow_dispatch runs the build only (no publish) for a dry run.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+jobs:
+  build_wheels:
+    name: wheels (linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build wheels
+        uses: pypa/cibuildwheel@v2.21
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cibw-wheels
+          path: wheelhouse/*.whl
+
+  build_sdist:
+    name: sdist
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build sdist
+        run: pipx run build --sdist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cibw-sdist
+          path: dist/*.tar.gz
+
+  publish:
+    name: publish to PyPI
+    # only on a tag, and only after wheel + sdist succeed
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: [build_wheels, build_sdist]
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write        # OIDC token for trusted publishing
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: cibw-*
+          path: dist
+          merge-multiple: true
+      - uses: pypa/gh-action-pypi-publish@release/v1

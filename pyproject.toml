@@ -1,5 +1,5 @@
 [build-system]
-requires = ["scikit-build-core==0.12.2", "nanobind==2.12.0"]
+requires = ["scikit-build-core==0.12.2", "nanobind==2.12.0", "cmake>=3.27", "ninja"]
 build-backend = "scikit_build_core.build"
 
 [project]
@@ -7,13 +7,26 @@ name = "fastcatan"
 version = "1.0.0"
 description = "High-throughput Catan simulator with Python bindings (frozen)"
 readme = "README.md"
-requires-python = ">=3.10"
+# nanobind STABLE_ABI (abi3) requires CPython 3.12+: one wheel covers 3.12/3.13/3.14.
+requires-python = ">=3.12"
+license = { text = "MIT" }
 authors = [{ name = "fastCatan" }]
+keywords = ["catan", "simulator", "reinforcement-learning", "game", "nanobind"]
+dependencies = ["numpy"]
 classifiers = [
     "Development Status :: 5 - Production/Stable",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: POSIX :: Linux",
     "Programming Language :: C++",
     "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
+
+[project.urls]
+# TODO: point at the hosted repo before publishing.
+Homepage = "https://github.com/s1nbo/catan-sim"
+Repository = "https://github.com/s1nbo/catan-sim"
 
 [tool.scikit-build]
 minimum-version = "0.10"
@@ -21,11 +34,29 @@ cmake.version = ">=3.27"
 cmake.build-type = "Release"
 build-dir = "build/{wheel_tag}"
 wheel.packages = ["python/fastcatan"]
+# nanobind STABLE_ABI -> tag the wheel abi3 (cp312-abi3), so one build serves 3.12+.
+wheel.py-api = "cp312"
 # Reuse our top-level CMakeLists; SKBUILD flag enables the nanobind branch.
 cmake.source-dir = "."
 
 [tool.scikit-build.cmake.define]
 CMAKE_BUILD_TYPE = "Release"
+
+# --- PyPI wheel builds (cibuildwheel, in CI) -----------------------------------
+# One abi3 wheel per platform. Linux only for now (the C++ build uses GCC/Clang
+# flags); macOS/Windows can be added to the CI matrix later.
+[tool.cibuildwheel]
+build = "cp312-*"                      # abi3 -> also serves 3.13+
+build-frontend = "build"
+# Prove the wheel imports + the native API is present, inside the CI container.
+test-command = "python -c \"import fastcatan as fc; assert hasattr(fc,'Env') and hasattr(fc,'BatchedEnv'); print('fastcatan', fc.OBS_SIZE, fc.NUM_ACTIONS)\""
+
+[tool.cibuildwheel.linux]
+# C++23 needs a modern GCC; manylinux_2_28 ships GCC 12+. (2014 image = GCC 10.)
+manylinux-x86-64-image = "manylinux_2_28"
+archs = ["x86_64"]
+# Portable baseline so the published wheel runs on any 2009+ CPU (NOT -march=native).
+config-settings = { "cmake.define.FASTCATAN_ARCH" = "x86-64-v2" }
 
 [tool.pytest.ini_options]
 # "." resolves fastcatan native helpers used by tests.

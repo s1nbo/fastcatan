@@ -12,15 +12,37 @@ on:
 
 jobs:
   build_wheels:
-    name: wheels (linux)
-    runs-on: ubuntu-latest
+    name: wheels ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux-x86_64
+            os: ubuntu-latest
+          - name: macos-x86_64
+            os: macos-13          # Intel runner
+            cibw_archs: x86_64
+            fc_arch: x86-64-v2
+            macos_target: "10.15"
+          - name: macos-arm64
+            os: macos-14          # Apple Silicon runner
+            cibw_archs: arm64
+            fc_arch: "off"        # -march=x86-64-v2 is x86-only; generic arm64
+            macos_target: "11.0"
     steps:
       - uses: actions/checkout@v4
       - name: Build wheels
         uses: pypa/cibuildwheel@v2.21
+        env:
+          # macOS: pick arch + portable -march + deployment target per runner.
+          # (Linux arch stays x86-64-v2 from pyproject.) Empty on Linux = no-op.
+          CIBW_ARCHS_MACOS: ${{ matrix.cibw_archs }}
+          CIBW_CONFIG_SETTINGS_MACOS: cmake.define.FASTCATAN_ARCH=${{ matrix.fc_arch }}
+          MACOSX_DEPLOYMENT_TARGET: ${{ matrix.macos_target }}
       - uses: actions/upload-artifact@v4
         with:
-          name: cibw-wheels
+          name: cibw-wheels-${{ matrix.name }}
           path: wheelhouse/*.whl
 
   build_sdist:

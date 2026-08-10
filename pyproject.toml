@@ -17,6 +17,7 @@ classifiers = [
     "Development Status :: 5 - Production/Stable",
     "License :: OSI Approved :: MIT License",
     "Operating System :: POSIX :: Linux",
+    "Operating System :: MacOS :: MacOS X",
     "Programming Language :: C++",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.12",
@@ -43,8 +44,10 @@ cmake.source-dir = "."
 CMAKE_BUILD_TYPE = "Release"
 
 # --- PyPI wheel builds (cibuildwheel, in CI) -----------------------------------
-# One abi3 wheel per platform. Linux only for now (the C++ build uses GCC/Clang
-# flags); macOS/Windows can be added to the CI matrix later.
+# One abi3 wheel per platform. Linux + macOS (the C++ build uses GCC/Clang flags;
+# Windows/MSVC is intentionally not supported — non-Linux/mac users build the sdist).
+# Per-runner arch is set by the CI matrix (CIBW_CONFIG_SETTINGS), because
+# -march=x86-64-v2 is x86-only and invalid on arm64 macs.
 [tool.cibuildwheel]
 build = "cp312-*"                      # abi3 -> also serves 3.13+
 build-frontend = "build"
@@ -57,6 +60,13 @@ manylinux-x86-64-image = "manylinux_2_28"
 archs = ["x86_64"]
 # Portable baseline so the published wheel runs on any 2009+ CPU (NOT -march=native).
 config-settings = { "cmake.define.FASTCATAN_ARCH" = "x86-64-v2" }
+
+[tool.cibuildwheel.macos]
+# Apple clang ships no OpenMP -> install libomp and point CMake at it, else the
+# build falls back to single-threaded (still a valid wheel). arch + deployment
+# target come from the CI matrix per runner (x86_64 vs arm64).
+before-all = "brew install libomp"
+environment = { OpenMP_ROOT = "$(brew --prefix libomp)" }
 
 [tool.pytest.ini_options]
 # "." resolves fastcatan native helpers used by tests.

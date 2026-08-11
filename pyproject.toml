@@ -4,7 +4,7 @@ build-backend = "scikit_build_core.build"
 
 [project]
 name = "fastcatan"
-version = "1.0.0"
+version = "1.0.1"
 description = "High-throughput Catan simulator with Python bindings (frozen)"
 readme = "README.md"
 # nanobind STABLE_ABI (abi3) requires CPython 3.12+: one wheel covers 3.12/3.13/3.14.

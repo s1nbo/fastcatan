@@ -14,8 +14,8 @@ legal-action bitmask, and a batched vectorized environment for GPU training.
 - 📦 **Batched** — `BatchedEnv` steps thousands of games per call (OpenMP, GIL released).
 - 🎯 **Deterministic** — seeded games are fully reproducible.
 
-> **Stability:** frozen at **v1.0.0**. The rules engine and the observation/action
-> interface are stable; pin an exact version (`fastcatan==1.0.0`).
+> **Stability:** the rules engine and the observation/action interface are frozen
+> and stable — pin an exact version (e.g. `fastcatan==1.0.1`).
 
 ## Install
 

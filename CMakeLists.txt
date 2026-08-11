@@ -103,7 +103,11 @@ endif()
 # Python extension via nanobind (built when invoked through scikit-build-core).
 # --------------------------------------------------------------------
 if(SKBUILD)
-    find_package(Python 3.10 REQUIRED COMPONENTS Interpreter Development.Module)
+    # Development.SABIModule is REQUIRED for nanobind STABLE_ABI to actually emit a
+    # limited-API `_fastcatan.abi3.so`. Without it nanobind silently falls back to a
+    # version-specific `.cpython-3XX.so`, which imports only on the build minor.
+    find_package(Python 3.12 REQUIRED
+        COMPONENTS Interpreter Development.Module Development.SABIModule)
     find_package(nanobind CONFIG REQUIRED)
 
     nanobind_add_module(_fastcatan

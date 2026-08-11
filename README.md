@@ -15,7 +15,7 @@ legal-action bitmask, and a batched vectorized environment for GPU training.
 - 🎯 **Deterministic** — seeded games are fully reproducible.
 
 > **Stability:** the rules engine and the observation/action interface are frozen
-> and stable — pin an exact version (e.g. `fastcatan==1.0.1`).
+> and stable — pin an exact version (e.g. `fastcatan==1.0.2`).
 
 ## Install
 

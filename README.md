@@ -104,21 +104,6 @@ pip install .
 pytest tests/
 ```
 
-Build a portable wheel by hand:
-
-```bash
-python -m build --wheel                                          # native
-python -m build --wheel -Ccmake.define.FASTCATAN_ARCH=x86-64-v2  # portable
-```
-
-### Releasing
-
-Pushing a version tag (`vX.Y.Z`) runs [`.github/workflows/publish.yml`](.github/workflows/publish.yml):
-[cibuildwheel](https://cibuildwheel.pypa.io) builds the `abi3` wheels (Linux in a
-`manylinux_2_28` container, macOS arm64) + sdist and uploads via PyPI
-**Trusted Publishing** (OIDC, no tokens). Published wheels use a portable
-`-march` baseline so they run on any modern CPU.
-
 ## License
 
 [MIT](LICENSE) © 2026 s1nbo

@@ -1,66 +1,124 @@
-# fastcatan — frozen Catan simulator
+# fastcatan
 
-High-throughput Catan simulator (C++ core, nanobind Python bindings). Builds the
-`fastcatan` Python package. **This repo is frozen at v1.0.0** — the simulator is
-stable and no longer under active development. AI / RL work lives in a separate
-repository and consumes this as a pinned dependency.
+[![PyPI](https://img.shields.io/pypi/v/fastcatan.svg)](https://pypi.org/project/fastcatan/)
+[![Python](https://img.shields.io/pypi/pyversions/fastcatan.svg)](https://pypi.org/project/fastcatan/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-## Layout
+A **high-throughput Settlers of Catan simulator** — C++ core with Python bindings
+([nanobind](https://github.com/wjakob/nanobind)), built for reinforcement-learning
+research. Millions of environment steps per second, a flat observation vector, a
+legal-action bitmask, and a batched vectorized environment for GPU training.
 
-| path | what |
-|------|------|
-| `src/`, `include/` | C++ simulator core |
-| `bindings/pycatan/bindings.cpp` | nanobind bindings |
-| `python/fastcatan/` | Python package (wraps the compiled extension) |
-| `sim/`, `examples/` | helpers, usage examples |
-| `tests/` | pytest + C++ fuzz/invariant tests |
-| `CMakeLists.txt`, `pyproject.toml` | build (scikit-build-core) |
+- ⚡ **Fast** — pure-C++ rules engine, ~4.6M batched env-steps/s on a single desktop.
+- 🧠 **RL-ready** — fixed-size `float32` observation, `uint64` action mask, scalar reward.
+- 📦 **Batched** — `BatchedEnv` steps thousands of games per call (OpenMP, GIL released).
+- 🎯 **Deterministic** — seeded games are fully reproducible.
+
+> **Stability:** frozen at **v1.0.0**. The rules engine and the observation/action
+> interface are stable; pin an exact version (`fastcatan==1.0.0`).
 
 ## Install
-
-From PyPI (prebuilt abi3 wheel, no toolchain needed, CPython 3.12+):
 
 ```bash
 pip install fastcatan
 ```
 
-Downstream projects pin an exact version: `fastcatan==1.0.0`.
+Prebuilt wheels: **Linux x86_64** and **macOS (Apple Silicon)**, CPython **3.12+**
+(one `abi3` wheel serves 3.12 / 3.13 / 3.14). Other platforms build from the sdist
+automatically (needs a C++ toolchain + CMake ≥ 3.27).
 
-From source (needs a C++ toolchain + CMake ≥ 3.27) — dev/editable or non-Linux:
+## Quickstart
 
-```bash
-pip install .            # tunes -march=native for THIS machine (fast local build)
+Play one game with a random legal policy:
+
+```python
+import numpy as np
+import fastcatan
+
+env = fastcatan.Env()
+env.reset(seed=0)
+
+mask = np.zeros(fastcatan.MASK_WORDS, dtype=np.uint64)   # legal-action bitmask
+obs  = np.zeros(fastcatan.OBS_SIZE,  dtype=np.float32)   # observation buffer
+rng  = np.random.default_rng(0)
+
+while True:
+    env.action_mask(mask)                 # fill legal moves for current player
+    env.write_obs(env.current_player, obs)   # fill that player's POV observation
+    legal = np.flatnonzero(np.unpackbits(mask.view(np.uint8), bitorder="little")
+                           [:fastcatan.NUM_ACTIONS])
+    action = int(rng.choice(legal))
+    reward, done = env.step(action)
+    if done:
+        vps = [env.player_vp(p) for p in range(fastcatan.NUM_PLAYERS)]
+        winner = next((p for p, v in enumerate(vps) if v >= 10), -1)
+        print("winner:", winner, "vps:", vps)
+        break
 ```
 
-## Publishing to PyPI
+### Batched (vectorized) environment
 
-Publishing is automated: pushing a version tag (`v1.0.0`) runs
-`.github/workflows/publish.yml`, which builds one **abi3** wheel (nanobind
-`STABLE_ABI` → one wheel serves 3.12/3.13/3.14) plus an sdist via
-[cibuildwheel](https://cibuildwheel.pypa.io) and uploads through PyPI
-**Trusted Publishing** (OIDC, no secrets). One-time setup on PyPI:
-configure the trusted publisher for project `fastcatan` (repo + workflow
-`publish.yml` + environment `pypi`).
+For RL throughput, step many games at once and drive them with a batched policy:
 
-The published wheel is built portable (`-march=x86-64-v2`, runs on any 2009+ CPU)
-inside a `manylinux_2_28` container (GCC 12+, required for C++23). Local builds
-keep `-march=native`. Build a wheel by hand:
+```python
+import numpy as np, fastcatan
 
-```bash
-python -m build --wheel                               # native (this CPU)
-python -m build --wheel -Ccmake.define.FASTCATAN_ARCH=x86-64-v2   # portable
+N = 4096
+env = fastcatan.BatchedEnv(N, seed=0)
+env.reset()
+
+masks = np.zeros((N, fastcatan.MASK_WORDS), dtype=np.uint64)
+obs   = np.zeros((N, fastcatan.OBS_SIZE),  dtype=np.float32)
+acts  = np.zeros(N, dtype=np.uint32)
+rew   = np.zeros(N, dtype=np.float32)
+done  = np.zeros(N, dtype=np.uint8)
+
+env.write_masks(masks)      # all N legal masks in one C++ call
+env.write_obs(obs)          # all N current-player observations
+# ... your batched policy fills `acts` ...
+env.step_raw(acts, rew, done)   # steps all N games (OpenMP, GIL released)
 ```
 
-Currently **Linux x86_64** only; add macOS/Windows to the CI `archs` matrix later.
+## API at a glance
 
-## Test
+| symbol | meaning |
+|--------|---------|
+| `Env` | single-game environment (`reset`, `step`, `action_mask`, `write_obs`, …) |
+| `BatchedEnv` | vectorized environment over N games (`step_raw`, `write_masks`, `write_obs`, …) |
+| `OBS_SIZE` / `OBS_FULL_SIZE` | observation length (POV / full-information) |
+| `NUM_ACTIONS` | size of the action space |
+| `MASK_WORDS` | `uint64` words in a legal-action bitmask (`ceil(NUM_ACTIONS/64)`) |
+| `NUM_PLAYERS`, `NUM_NODES`, `NUM_EDGES`, `NUM_HEXES`, `NUM_PORTS` | board constants |
+| `SKIP_ACTION` | no-op action id (parked finished games in a batch) |
+
+`env.step(action)` returns `(reward, done)`. Observations are written into
+caller-provided buffers (no per-step allocation). See [`examples/`](examples/) for
+random and alpha-beta players.
+
+## Development
+
+Build from source (tunes `-march=native` for your machine):
 
 ```bash
 pip install .
 pytest tests/
 ```
 
-## Versioning
+Build a portable wheel by hand:
 
-Frozen releases are git tags (`v1.0.0`, …). Bump `pyproject.toml` `version` and
-tag if the simulator is ever revised; downstream projects pin an exact tag.
+```bash
+python -m build --wheel                                          # native
+python -m build --wheel -Ccmake.define.FASTCATAN_ARCH=x86-64-v2  # portable
+```
+
+### Releasing
+
+Pushing a version tag (`vX.Y.Z`) runs [`.github/workflows/publish.yml`](.github/workflows/publish.yml):
+[cibuildwheel](https://cibuildwheel.pypa.io) builds the `abi3` wheels (Linux in a
+`manylinux_2_28` container, macOS arm64) + sdist and uploads via PyPI
+**Trusted Publishing** (OIDC, no tokens). Published wheels use a portable
+`-march` baseline so they run on any modern CPU.
+
+## License
+
+[MIT](LICENSE) © 2026 s1nbo

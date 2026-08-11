@@ -70,3 +70,7 @@ jobs:
           path: dist
           merge-multiple: true
       - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          # idempotent re-runs: upload only missing files, don't 400 on ones
+          # already published for this version
+          skip-existing: true

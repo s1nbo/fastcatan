@@ -20,16 +20,13 @@ jobs:
         include:
           - name: linux-x86_64
             os: ubuntu-latest
-          - name: macos-x86_64
-            os: macos-13          # Intel runner
-            cibw_archs: x86_64
-            fc_arch: x86-64-v2
-            macos_target: "10.15"
           - name: macos-arm64
             os: macos-14          # Apple Silicon runner
             cibw_archs: arm64
             fc_arch: "off"        # -march=x86-64-v2 is x86-only; generic arm64
             macos_target: "11.0"
+          # Intel mac (macos-13 / x86_64) intentionally dropped. Intel-mac users
+          # build from the sdist.
     steps:
       - uses: actions/checkout@v4
       - name: Build wheels

@@ -55,17 +55,15 @@ test-command = "python -c \"import fastcatan as fc; assert hasattr(fc,'Env') and
 
 [tool.cibuildwheel.linux]
 # C++23 needs a modern GCC; manylinux_2_28 ships GCC 12+. (2014 image = GCC 10.)
-manylinux-x86-64-image = "manylinux_2_28"
+manylinux-x86_64-image = "manylinux_2_28"
 archs = ["x86_64"]
 # Portable baseline so the published wheel runs on any 2009+ CPU (NOT -march=native).
 config-settings = { "cmake.define.FASTCATAN_ARCH" = "x86-64-v2" }
 
-[tool.cibuildwheel.macos]
-# Apple clang ships no OpenMP -> install libomp and point CMake at it, else the
-# build falls back to single-threaded (still a valid wheel). arch + deployment
-# target come from the CI matrix per runner (x86_64 vs arm64).
-before-all = "brew install libomp"
-environment = { OpenMP_ROOT = "$(brew --prefix libomp)" }
+# macOS: no OpenMP. Apple clang ships none, and bundling homebrew libomp breaks
+# `delocate-wheel --require-archs`. The mac wheel builds single-threaded (still
+# correct — BatchedEnv runs serial); heavy parallel runs are on Linux anyway.
+# arch + deployment target come from the CI matrix per runner (x86_64 vs arm64).
 
 [tool.pytest.ini_options]
 # "." resolves fastcatan native helpers used by tests.

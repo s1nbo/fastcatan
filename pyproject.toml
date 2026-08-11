@@ -25,9 +25,8 @@ classifiers = [
 ]
 
 [project.urls]
-# TODO: point at the hosted repo before publishing.
-Homepage = "https://github.com/s1nbo/catan-sim"
-Repository = "https://github.com/s1nbo/catan-sim"
+Homepage = "https://github.com/s1nbo/fastcatan"
+Repository = "https://github.com/s1nbo/fastcatan"
 
 [tool.scikit-build]
 minimum-version = "0.10"

@@ -46,8 +46,8 @@ namespace catan {
     // Full-state appendix: the hidden enemy state the POV obs masks out.
     // Per opponent (relseat +1, +2, +3), 16 floats:
     // [resources(5), dev_playable(5), dev_bought_pending(5), hidden_dev_vp(1)]
-    // Consumers: the learned JUDGE (leaf value) only — the same information
-    // ab_value reads at leaves. POV policy nets keep the OBS_SIZE prefix.
+    // This is a privileged simulator/debugging view. Policies operating under
+    // partial observability must use only the OBS_SIZE prefix.
     inline constexpr uint32_t OBS_FULL_APPENDIX = 3 * 16;
     inline constexpr uint32_t OBS_FULL_SIZE = OBS_SIZE + OBS_FULL_APPENDIX;
 

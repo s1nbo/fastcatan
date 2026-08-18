@@ -14,8 +14,9 @@ legal-action bitmask, and a batched vectorized environment for GPU training.
 - 📦 **Batched** — `BatchedEnv` steps thousands of games per call (OpenMP, GIL released).
 - 🎯 **Deterministic** — seeded games are fully reproducible.
 
-> **Stability:** the rules engine and the observation/action interface are frozen
-> and stable — pin an exact version (e.g. `fastcatan==1.1.0`).
+> **Stability:** pin an exact version for reproducible experiments. FastCatan
+> 2.x is simulator-only; native AlphaBeta/search agents from 1.x moved to the
+> separate `catan-rl` repository.
 
 ## Install
 
@@ -44,7 +45,7 @@ rng  = np.random.default_rng(0)
 
 while True:
     env.action_mask(mask)                 # fill legal moves for current player
-    env.write_obs(env.current_player, obs)   # fill that player's POV observation
+    env.write_obs(env.actor_to_act, obs)     # fill the acting seat's POV observation
     legal = np.flatnonzero(np.unpackbits(mask.view(np.uint8), bitorder="little")
                            [:fastcatan.NUM_ACTIONS])
     action = int(rng.choice(legal))
@@ -92,8 +93,9 @@ env.step_raw(acts, rew, done)   # steps all N games (OpenMP, GIL released)
 | `SKIP_ACTION` | no-op action id (parked finished games in a batch) |
 
 `env.step(action)` returns `(reward, done)`. Observations are written into
-caller-provided buffers (no per-step allocation). See [`examples/`](examples/) for
-random and alpha-beta players.
+caller-provided buffers (no per-step allocation). Agent implementations, training,
+search, and evaluation live in the separate `catan-rl` repository. The remaining
+[`examples/`](examples/) exercise simulator throughput and deterministic stepping.
 
 ## Development
 

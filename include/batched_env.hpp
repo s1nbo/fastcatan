@@ -46,12 +46,12 @@ namespace catan {
     void batched_env_write_masks(const BatchedEnv& env, uint64_t* out) noexcept;
 
     // ------------------------------------------------------------------
-    // Batched tree-search primitives (GPU-batched MCTS support).
+    // Batched branching and diagnostic primitives.
     //
-    // Additive: the rollout API above is unchanged. These let a search drive
-    // the N slots as parallel scratch branches — load a frontier of
+    // Additive: the rollout API above is unchanged. These let a consumer drive
+    // N slots as parallel scratch branches — load a frontier of
     // snapshots, reseed chance per simulation, step WITHOUT auto-reset, and
-    // read obs/signatures in one OpenMP pass instead of N Python calls.
+    // read observations/signatures in one OpenMP pass instead of N Python calls.
     // ------------------------------------------------------------------
 
     // Bytes per env snapshot (GameState + BoardLayout) — the row stride of
@@ -79,7 +79,7 @@ namespace catan {
     void batched_env_reseed(BatchedEnv& env, const uint64_t* seeds) noexcept;
 
     // Step env i by actions[i] WITHOUT auto-reset: terminal states stay
-    // readable and loaded branches aren't wiped mid-search. SKIP_ACTION
+    // readable and loaded branches are not wiped. SKIP_ACTION
     // leaves env i untouched (rewards_out[i]=0, dones_out[i]=0). Does not
     // advance seed_counter.
     void batched_env_step_raw(BatchedEnv& env, const uint32_t* actions,
@@ -91,29 +91,18 @@ namespace catan {
                                    float* out) noexcept;
 
     // Obs for env i from ALL 4 POVs -> `out` is (n, 4, OBS_SIZE), pov-major
-    // within each env. One pass for max^n leaf evaluation.
+    // within each env.
     void batched_env_write_obs_all4(const BatchedEnv& env, float* out) noexcept;
 
-    // OBS_FULL_SIZE variants (POV prefix + hidden-enemy appendix) for the
-    // learned judge. `out` rows are OBS_FULL_SIZE wide.
+    // Privileged OBS_FULL_SIZE diagnostic variants (POV prefix plus hidden
+    // enemy appendix). `out` rows are OBS_FULL_SIZE wide.
     void batched_env_write_obs_full_pov(const BatchedEnv& env, const uint8_t* povs,
                                         float* out) noexcept;
     void batched_env_write_obs_full_all4(const BatchedEnv& env, float* out) noexcept;
 
     // Decision/chance signature per env -> `out` is (n, SIG_INTS) int32.
-    // Row layout documented at SIG_INTS. Distinguishes chance outcomes the
-    // same way the Python MCTS _signature does (dice totals, robber steals
-    // via handsizes, VP dev-draws via vps).
+    // Row layout documented at SIG_INTS. Distinguishes dice totals, robber
+    // steals via hand sizes, and VP development-card draws via scores.
     void batched_env_write_sigs(const BatchedEnv& env, int32_t* out) noexcept;
-
-    // Native AlphaBeta pick for every env's acting player, one OpenMP pass:
-    // out[i] = ab_decide(states[i], layouts[i], actor_to_act(states[i]),
-    // depth, prune, nullptr, banned). 0xFFFFFFFF where no legal action.
-    // `banned` optional uint64[MASK_WORDS] (see search.hpp). This is the
-    // batched opponent/in-tree-advance primitive for training vs AB — the
-    // per-env Python Env round-trip was the throughput killer.
-    void batched_env_ab_decide(const BatchedEnv& env, int depth, bool prune,
-                               const uint64_t* banned, uint32_t* out,
-                               int chance_mode = 0) noexcept;
 
 }  // namespace catan

@@ -448,7 +448,7 @@ inline void check_game_ended(GameState& s) noexcept {
 
 // Apply the outcome of a known dice roll (sum 2..12): a 7 triggers
 // discard/robber setup; otherwise production payout. Factored out of
-// handle_roll_dice so the alpha-beta search can fork dice outcomes
+// handle_roll_dice so weighted transition expansion can fork dice outcomes
 // (expectimax, see expand_action) without consuming RNG.
 inline void apply_roll_outcome(GameState& s, const BoardLayout& b, uint8_t roll) noexcept {
     s.dice_roll = roll;
@@ -554,7 +554,7 @@ inline void handle_end_turn(GameState& s) noexcept {
 
 // Move one card of resource `r` from `victim` to current_player. Caller
 // validates the victim actually holds `r`. Split out of do_steal so the
-// alpha-beta search can fork the stolen resource (expectimax) without RNG.
+// weighted transition expansion can fork the stolen resource without RNG.
 inline void do_steal_resource(GameState& s, uint8_t victim, uint8_t r) noexcept {
     s.player_resources[victim][r]            -= 1;
     s.player_handsize[victim]                -= 1;
@@ -1357,9 +1357,8 @@ void step_one(GameState& s, const BoardLayout& b, uint32_t action,
 }
 
 // =====================================================================
-// Expectimax expansion for the alpha-beta search (see rules.hpp).
-// Mirrors catanatron's tree_search_utils.execute_spectrum: deterministic
-// actions resolve to one child; the three stochastic action classes fan out.
+// Weighted transition expansion (see rules.hpp). Deterministic actions resolve
+// to one child; stochastic action classes fan out over simulator outcomes.
 // =====================================================================
 
 // 2d6 sum probability, sum in [2,12]: count(ways)/36 = (6 - |7-sum|)/36.

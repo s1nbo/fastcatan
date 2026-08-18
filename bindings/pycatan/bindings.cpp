@@ -12,7 +12,6 @@
 #include "mask.hpp"
 #include "obs.hpp"
 #include "batched_env.hpp"
-#include "search.hpp"
 
 namespace nb = nanobind;
 using namespace catan;
@@ -70,9 +69,7 @@ struct PyEnv {
     uint8_t trade_want(uint8_t r) const noexcept { return s.trade_want[r]; }
     uint8_t trade_compose_count() const noexcept { return s.trade_compose_count; }
 
-    // Snapshot/restore as Python bytes. Used by alpha-beta search to
-    // branch state without committing to one path.
-    // Just for testing later Alpha Beta will be done in C++ for speed.
+    // Snapshot/restore as Python bytes for branching and reproducibility.
     nb::bytes snapshot() const {
         char buf[sizeof(GameState) + sizeof(BoardLayout)];
         std::memcpy(buf, &s, sizeof(GameState));
@@ -90,10 +87,8 @@ struct PyEnv {
     // Overwrite the env's internal RNG from a 64-bit seed. The rng lives INSIDE
     // GameState (state.hpp), so snapshot() captures it and load_snapshot()
     // restores it byte-for-byte — meaning a load+step(ROLL_DICE) replays the
-    // SAME dice every time. MCTS calls reseed() after load_snapshot to resample
-    // chance (dice/dev-draw/robber-steal) per simulation, turning the search
-    // into a correct stochastic-MCTS that averages over the dice distribution
-    // instead of optimizing against one predetermined roll.
+    // SAME dice every time. Call reseed() after load_snapshot when independent
+    // dice/dev-draw/robber-steal samples are required for a branch.
     void reseed(uint64_t seed) noexcept {
         xoshiro_seed(s.rng, seed);
     }
@@ -213,7 +208,7 @@ Determinism: same seed -> same trajectory. Perft hashes pinned.
              "Last dice roll (2..12) or 0 if not yet rolled this turn.")
         .def_prop_ro("turn_count",     &PyEnv::turn_count,
              "Monotonic turn counter (increments on END_TURN).")
-        // State accessors for heuristic policies / alpha-beta evaluation.
+        // State accessors for debugging and simulator inspection.
         .def("player_vp", &PyEnv::player_vp, nb::arg("seat"),
              "Total VP for ``seat`` (incl. hidden VP cards).")
         .def("player_vp_public", &PyEnv::player_vp_public, nb::arg("seat"),
@@ -250,7 +245,7 @@ Determinism: same seed -> same trajectory. Perft hashes pinned.
              "MAX_TRADE_COMPOSE_PER_TURN churn counter).")
         .def_prop_ro("largest_army_owner", &PyEnv::largest_army_owner,
              "Player holding largest army or 255 if none.")
-        // Snapshot/restore for state branching (alpha-beta search etc).
+        // Snapshot/restore for state branching and reproducible diagnostics.
         .def("snapshot", &PyEnv::snapshot,
              "Serialize the env's GameState + BoardLayout into a bytes "
              "object. Round-trip with ``load_snapshot``.")
@@ -260,9 +255,9 @@ Determinism: same seed -> same trajectory. Perft hashes pinned.
         .def("reseed", &PyEnv::reseed, nb::arg("seed"),
              "Reseed the internal RNG from a 64-bit key. The RNG is part of "
              "GameState, so snapshot/load_snapshot round-trip it verbatim and a "
-             "restored state replays identical dice. AlphaZero MCTS calls this "
-             "after load_snapshot to resample chance (dice/dev/steal) per "
-             "simulation. No effect on deterministic actions.")
+             "restored state replays identical dice. Call this after restoring "
+             "a branch when independently sampled chance is required. No effect "
+             "on deterministic actions.")
         .def("action_mask", &PyEnv::action_mask, nb::arg("out"),
              "Read the incrementally-maintained action mask into the "
              "provided uint64 buffer of length MASK_WORDS.")
@@ -280,61 +275,8 @@ Determinism: same seed -> same trajectory. Perft hashes pinned.
              nb::arg("pov"), nb::arg("out"),
              "OBS_FULL_SIZE variant: byte-identical OBS_SIZE prefix plus the "
              "hidden-enemy appendix (exact resources, dev cards by type, "
-             "pending dev buys, hidden dev VP per opponent). For the learned "
-             "judge — the same information ab_value reads at leaves.")
-        // --- Native expectimax alpha-beta (faithful Catanatron port) ---
-        .def("ab_decide",
-             [](const PyEnv& e, uint8_t pov, int depth, bool prune) {
-                 return ab_decide(e.s, e.b, pov, depth, prune, nullptr);
-             },
-             nb::arg("pov"), nb::arg("depth") = 2, nb::arg("prune") = false,
-             "Pick ``pov``'s best action via depth-limited expectimax "
-             "alpha-beta (Catanatron AlphaBetaPlayer port, DEFAULT_WEIGHTS). "
-             "Reads the live state; does not mutate it. Returns a flat action "
-             "ID, or 0xFFFFFFFF if there is no legal action.")
-        .def("ab_decide",
-             [](const PyEnv& e, uint8_t pov, int depth, bool prune,
-                nb::ndarray<uint64_t, nb::ndim<1>, nb::c_contig,
-                            nb::device::cpu> banned_mask,
-                int chance_mode) {
-                 if (banned_mask.shape(0) != MASK_WORDS)
-                     throw std::runtime_error("banned mask length mismatch");
-                 return ab_decide(e.s, e.b, pov, depth, prune, nullptr,
-                                  banned_mask.data(), chance_mode);
-             },
-             nb::arg("pov"), nb::arg("depth"), nb::arg("prune"),
-             nb::arg("banned_mask"), nb::arg("chance_mode"),
-             "Overload with banned-action bitmask AND chance model: "
-             "chance_mode=1 emulates Catanatron's tree_search_utils blur "
-             "(flat-1/5 steals with whiff children, info-set BUY_DEV deck) so "
-             "the search MODELS catanatron's AlphaBeta faithfully — the "
-             "true-fork model mispredicts its robber play (25% agreement; "
-             "model_divergence.py 2026-06-06).")
-        .def("ab_decide",
-             [](const PyEnv& e, uint8_t pov, int depth, bool prune,
-                nb::ndarray<uint64_t, nb::ndim<1>, nb::c_contig,
-                            nb::device::cpu> banned_mask) {
-                 if (banned_mask.shape(0) != MASK_WORDS)
-                     throw std::runtime_error("banned mask length mismatch");
-                 return ab_decide(e.s, e.b, pov, depth, prune, nullptr,
-                                  banned_mask.data());
-             },
-             nb::arg("pov"), nb::arg("depth"), nb::arg("prune"),
-             nb::arg("banned_mask"),
-             "Overload with a banned-action bitmask (uint64[MASK_WORDS], "
-             "bit=1 -> excluded) applied at EVERY node of the search — e.g. "
-             "p2p trades when the driving game suppresses them. Never "
-             "strands: a node whose action set would empty keeps its "
-             "unfiltered set. Whenever a non-banned legal root action exists "
-             "the pick is non-banned, so callers need no random fallback "
-             "(closes the fallback hole learners farm).")
-        .def("ab_value",
-             [](const PyEnv& e, uint8_t pov) {
-                 return ab_value(e.s, e.b, pov, nullptr);
-             },
-             nb::arg("pov"),
-             "Catanatron base_fn heuristic value of the current state from "
-             "``pov``'s seat (DEFAULT_WEIGHTS). Pure; used for validation.");
+             "pending dev buys, hidden dev VP per opponent). Intended for "
+             "simulator diagnostics and explicitly privileged experiments.");
 
     // --- BatchedEnv: hot path ---
     using ArrU32 = nb::ndarray<uint32_t, nb::ndim<1>, nb::c_contig, nb::device::cpu>;
@@ -498,13 +440,13 @@ roughly free vs full recompute.
                  return nb::bytes(buf, sizeof(buf));
              }, nb::arg("env_idx"),
              "Serialize env ``env_idx`` (GameState + BoardLayout) into a "
-             "bytes object. Used by alpha-beta search to take a baseline "
-             "snapshot, then explore branches via a scratch ``Env``.")
+             "bytes object for branching; restore it through ``Env`` or "
+             "``load_snapshots``.")
         .def("player_handsize",
              [](const PyBatchedEnv& e, uint32_t i, uint32_t pl) -> uint8_t {
                  return e.inner.states[i].player_handsize[pl];
              }, nb::arg("env_idx"), nb::arg("player"))
-        // --- Batched tree-search primitives (GPU-batched MCTS) ---
+        // --- Batched branching and diagnostic primitives ---
         .def("save_snapshots",
              [](PyBatchedEnv& e, ArrU8_2D out) {
                  if (out.shape(0) != e.inner.n || out.shape(1) != SNAPSHOT_BYTES)
@@ -581,7 +523,7 @@ counter. GIL released.)")
              },
              nb::arg("out"),
              "Fill (num_envs, 4, OBS_SIZE) float32 with every env's obs from "
-             "all 4 seat POVs — one pass for max^n MCTS leaf evaluation.")
+             "all 4 seat POVs in one pass.")
         .def("write_obs_full_pov_batch",
              [](PyBatchedEnv& e, ArrU8 povs, ArrF32_2D out) {
                  if (povs.shape(0) != e.inner.n)
@@ -593,7 +535,7 @@ counter. GIL released.)")
              },
              nb::arg("povs"), nb::arg("out"),
              "write_obs_pov_batch with OBS_FULL_SIZE rows (POV prefix + "
-             "hidden-enemy appendix) — judge leaf eval.")
+             "hidden-enemy appendix) for privileged diagnostics.")
         .def("write_obs_full_all4",
              [](PyBatchedEnv& e, ArrF32_3D out) {
                  if (out.shape(0) != e.inner.n || out.shape(1) != 4
@@ -603,35 +545,7 @@ counter. GIL released.)")
                  batched_env_write_obs_full_all4(e.inner, out.data());
              },
              nb::arg("out"),
-             "write_obs_all4 with OBS_FULL_SIZE rows — judge leaf eval for "
-             "max^n search.")
-        .def("ab_decide_batch",
-             [](PyBatchedEnv& e, int depth, bool prune,
-                ArrU64 banned_mask, ArrU32 out) {
-                 if (banned_mask.shape(0) != MASK_WORDS)
-                     throw std::runtime_error("banned mask length mismatch");
-                 if (out.shape(0) != e.inner.n)
-                     throw std::runtime_error("out length mismatch");
-                 nb::gil_scoped_release release;
-                 batched_env_ab_decide(e.inner, depth, prune,
-                                       banned_mask.data(), out.data());
-             },
-             nb::arg("depth"), nb::arg("prune"), nb::arg("banned_mask"),
-             nb::arg("out"),
-             "Native AB pick for every env's acting player in one OpenMP "
-             "pass: out[i] = ab_decide(env i, actor_to_act, depth, prune, "
-             "banned_mask). 0xFFFFFFFF where no legal action. The batched "
-             "opponent primitive for training/searching vs AB.")
-        .def("ab_decide_batch",
-             [](PyBatchedEnv& e, int depth, bool prune, ArrU32 out) {
-                 if (out.shape(0) != e.inner.n)
-                     throw std::runtime_error("out length mismatch");
-                 nb::gil_scoped_release release;
-                 batched_env_ab_decide(e.inner, depth, prune, nullptr,
-                                       out.data());
-             },
-             nb::arg("depth"), nb::arg("prune"), nb::arg("out"),
-             "Overload without a banned mask (full action space).")
+             "write_obs_all4 with OBS_FULL_SIZE rows for privileged diagnostics.")
         .def("write_sigs",
              [](PyBatchedEnv& e, ArrI32_2D out) {
                  if (out.shape(0) != e.inner.n
@@ -644,6 +558,6 @@ counter. GIL released.)")
              R"(Fill (num_envs, SIG_INTS) int32 decision/chance signatures.
 
 Row layout: [actor_to_act, phase, flag, dice_roll, handsize0..3, vp0..3]
-— the fields the Python MCTS ``_signature`` reads, in one OpenMP pass.
+— compact fields for branch/outcome identification, in one OpenMP pass.
 Use ``row.tobytes()`` as a chance-outcome key.)");
 }

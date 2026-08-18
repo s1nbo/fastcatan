@@ -1,9 +1,8 @@
-"""Parity tests for the batched tree-search primitives (GPU-batched MCTS).
+"""Parity tests for batched branching and diagnostic primitives.
 
 BatchedEnv.{save_snapshots, load_snapshots, reseed, step_raw,
-write_obs_pov_batch, write_obs_all4, write_sigs} and the banned-mask
-ab_decide overload were added so a search can drive the N slots as parallel
-scratch branches. Every batched op must agree byte-for-byte with the
+write_obs_pov_batch, write_obs_all4, write_sigs} let a consumer drive N slots
+as parallel scratch branches. Every batched op must agree byte-for-byte with the
 single-Env reference path, and step_raw must NOT auto-reset.
 """
 from __future__ import annotations
@@ -29,25 +28,6 @@ def _legal_ids(mask_words: np.ndarray) -> list[int]:
                 ids.append(a)
             w &= w - 1
     return ids
-
-
-def _p2p_banned_words() -> np.ndarray:
-    """uint64[MASK_WORDS] with every p2p-trade action bit set (mirrors
-    models.alphazero.mcts.p2p_trade_mask, inlined to keep this test
-    torch-free)."""
-    a = fc.action
-    ids = (
-        list(range(a.TRADE_ADD_GIVE_BASE, a.TRADE_ADD_GIVE_BASE + 5))
-        + list(range(a.TRADE_ADD_WANT_BASE, a.TRADE_ADD_WANT_BASE + 5))
-        + [a.TRADE_OPEN, a.TRADE_ACCEPT, a.TRADE_DECLINE]
-        + list(range(a.TRADE_CONFIRM_BASE, a.TRADE_CONFIRM_BASE + 4))
-        + [a.TRADE_CANCEL]
-    )
-    words = np.zeros(fc.MASK_WORDS, dtype=np.uint64)
-    for i in ids:
-        if i < fc.NUM_ACTIONS:
-            words[i >> 6] |= np.uint64(1) << np.uint64(i & 63)
-    return words
 
 
 def _warm_batch(seed=SEED, steps=WARM_STEPS):
@@ -147,7 +127,7 @@ def test_obs_pov_batch_and_all4_match_env():
 def test_step_raw_parity_with_env():
     """Same snapshot + same reseed + same action == identical successor,
     reward and done — including chance steps (dice/draws), which is the
-    property batched MCTS descent relies on."""
+    property any reproducible branching consumer relies on."""
     be = _warm_batch()
     env = fc.Env()
     rng = np.random.default_rng(99)
@@ -222,37 +202,3 @@ def test_step_raw_no_autoreset_on_done():
     acts[:] = fc.SKIP_ACTION
     be.step_raw(acts, rew, done)
     assert np.array_equal(_sigs(be)[finished], sig_before)
-
-
-def test_ab_decide_banned_mask():
-    be = _warm_batch()
-    buf = _save(be)
-    sigs = _sigs(be)
-    banned = _p2p_banned_words()
-    zeros = np.zeros(fc.MASK_WORDS, dtype=np.uint64)
-    banned_ids = set(_legal_ids(banned))
-    env = fc.Env()
-    mask1 = np.zeros(fc.MASK_WORDS, dtype=np.uint64)
-    checked = 0
-    for i in range(N):
-        env.load_snapshot(buf[i].tobytes())
-        pov = int(sigs[i][0])
-        env.action_mask(mask1)
-        legal = _legal_ids(mask1)
-        if len(legal) <= 1:
-            continue
-        plain = env.ab_decide(pov, 1, False)
-        with_zeros = env.ab_decide(pov, 1, False, zeros)
-        assert plain == with_zeros, "all-zeros mask must equal no mask"
-        pick = env.ab_decide(pov, 1, False, banned)
-        assert pick in legal
-        assert pick not in banned_ids, (
-            "banned-mask pick must stay inside the caller's filtered set"
-        )
-        # never-strand: banning EVERYTHING falls back to the unfiltered set
-        all_banned = np.full(fc.MASK_WORDS, np.uint64(0xFFFFFFFFFFFFFFFF),
-                             dtype=np.uint64)
-        pick_all = env.ab_decide(pov, 1, False, all_banned)
-        assert pick_all in legal
-        checked += 1
-    assert checked > 0, "warm states produced no multi-legal decision points"

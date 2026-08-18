@@ -5,6 +5,11 @@
 
 namespace catan {
 
+    // Increment whenever the meaning of an observation slot changes even if
+    // OBS_SIZE stays constant. Checkpoint manifests use this to reject silent
+    // semantic incompatibility.
+    inline constexpr uint32_t OBS_SEMANTICS_VERSION = 2;
+
     // Per-player slot count (used both for self and opponents in the obs).
     // [vp, handsize, total_dev, knights_played, road_length,
     //  settle_left, city_left, road_left,
@@ -27,8 +32,9 @@ namespace catan {
         6 * topology::NUM_PORTS +
         topology::NUM_HEXES;
 
-    // Game-state fields. phase(4) flag(8) dice_roll(13) turn(1) bank(5)
-    // dev_deck(5) longest(5) army(5) start_player(4) free_roads(1)
+    // Game-state fields. phase(4) flag(8) dice_roll(13) turn(1) bank(5),
+    // public dev-deck total + reserved padding(5), longest(5), army(5),
+    // start_player(4), free_roads(1). The per-type deck composition is hidden.
     inline constexpr uint32_t OBS_GAME = 4 + 8 + 13 + 1 + 5 + 5 + 5 + 5 + 4 + 1;
 
     // Trade scratch fields. proposer(5) give(5) want(5) response(3*4)

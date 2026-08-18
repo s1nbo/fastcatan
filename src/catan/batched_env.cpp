@@ -103,7 +103,7 @@ void batched_env_write_obs(const BatchedEnv& env, float* out) noexcept {
 #endif
     for (int32_t i = 0; i < int32_t(env.n); ++i) {
         write_obs(env.states[i], env.layouts[i],
-                   env.states[i].current_player,
+                   actor_to_act(env.states[i]),
                    out + std::size_t(i) * OBS_SIZE);
     }
 }
@@ -222,7 +222,7 @@ void batched_env_ab_decide(const BatchedEnv& env, int depth, bool prune,
 #endif
     for (int32_t i = 0; i < int32_t(env.n); ++i) {
         const GameState& s = env.states[i];
-        out[i] = ab_decide(s, env.layouts[i], s.current_player,
+        out[i] = ab_decide(s, env.layouts[i], actor_to_act(s),
                            depth, prune, nullptr, banned, chance_mode);
     }
 }
@@ -234,7 +234,7 @@ void batched_env_write_sigs(const BatchedEnv& env, int32_t* out) noexcept {
     for (int32_t i = 0; i < int32_t(env.n); ++i) {
         const GameState& s = env.states[i];
         int32_t* row = out + std::size_t(i) * SIG_INTS;
-        row[0] = s.current_player;
+        row[0] = actor_to_act(s);
         row[1] = int32_t(s.phase);
         row[2] = int32_t(s.flag);
         row[3] = s.dice_roll;

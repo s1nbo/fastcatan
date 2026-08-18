@@ -5,6 +5,7 @@ from ._fastcatan import (  # noqa: F401
     Env,
     OBS_SIZE,
     OBS_FULL_SIZE,
+    OBS_SEMANTICS_VERSION,
     MASK_WORDS,
     NUM_ACTIONS,
     NUM_PLAYERS,
@@ -23,6 +24,7 @@ __all__ = [
     "Env",
     "OBS_SIZE",
     "OBS_FULL_SIZE",
+    "OBS_SEMANTICS_VERSION",
     "MASK_WORDS",
     "NUM_ACTIONS",
     "NUM_PLAYERS",
@@ -36,4 +38,4 @@ __all__ = [
     "action",
 ]
 
-__version__ = "1.0.2"
+__version__ = "1.1.0"

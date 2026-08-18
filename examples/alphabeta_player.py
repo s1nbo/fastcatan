@@ -66,7 +66,7 @@ class AlphaBetaPlayer(Player):
 
     def act(self, env, mask: np.ndarray) -> int:
         if self.color is None:
-            self.color = env.current_player
+            self.color = env.actor_to_act
 
         actions = self._legal(mask)
         if len(actions) == 1:
@@ -92,7 +92,7 @@ class AlphaBetaPlayer(Player):
         if not actions:
             return value_fn(env, self.color, self.params)
 
-        maximizing = env.current_player == self.color
+        maximizing = env.actor_to_act == self.color
         snap = env.snapshot()
 
         if maximizing:
@@ -157,7 +157,7 @@ class NativeAlphaBetaPlayer(Player):
         self.prune = bool(prune)
 
     def act(self, env, mask: np.ndarray) -> int:
-        a = env.ab_decide(env.current_player, self.depth, self.prune)
+        a = env.ab_decide(env.actor_to_act, self.depth, self.prune)
         if a == 0xFFFFFFFF:  # no legal action seen (shouldn't happen)
             return legal_actions(mask)[0]
         if self.forbid is not None and (int(self.forbid[a >> 6]) >> (a & 63)) & 1:

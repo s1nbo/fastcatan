@@ -167,4 +167,14 @@ namespace catan {
     static_assert(std::is_trivially_copyable_v<BoardLayout>,
                   "BoardLayout must be trivially copyable");
 
+    // Seat that owns the next decision. During a roll-7 discard sequence the
+    // turn owner remains in current_player while discarding_player advances
+    // through the affected seats; every policy-facing caller must use this
+    // helper instead of assuming that current_player always owns the action.
+    inline constexpr uint8_t actor_to_act(const GameState& s) noexcept {
+        return s.flag == Flag::DISCARD_RESOURCES
+            ? s.discarding_player
+            : s.current_player;
+    }
+
 }

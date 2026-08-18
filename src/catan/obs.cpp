@@ -5,7 +5,7 @@
 //     16 floats each = 64 floats
 //   Self private (resources, dev cards, dev_card_played flag) = 16 floats
 //   Board (node, edge, hex, port, robber)
-//   Game state (phase, flag, dice, bank, dev_deck, awards, ...)
+//   Game state (phase, flag, dice, bank, public dev-deck total, awards, ...)
 //   Trade scratch (proposer, give, want, responses)
 #include "obs.hpp"
 #include "topology.hpp"
@@ -150,7 +150,10 @@ void write_obs(const GameState& s, const BoardLayout& b,
     w.onehot(int(s.dice_roll), 13);
     w.put(float(s.turn_count) / 400.0f);          // normalized turn count
     for (uint8_t r = 0; r < NUM_RESOURCES; ++r) w.put(float(s.bank[r]) / norm::BANK);
-    for (uint8_t d = 0; d < 5; ++d)             w.put(float(s.dev_deck[d]) / norm::DEVDECK);
+    uint16_t dev_remaining = 0;
+    for (uint8_t d = 0; d < 5; ++d) dev_remaining += s.dev_deck[d];
+    w.put(float(dev_remaining) / norm::DEVDECK);
+    w.zero(4);  // preserve the frozen tensor width without exposing card types
 
     // longest_road_owner: 5 slots [self, +1, +2, +3, none]
     if (s.longest_road_owner == NO_PLAYER) w.onehot(4, 5);
@@ -167,17 +170,28 @@ void write_obs(const GameState& s, const BoardLayout& b,
     w.put(float(s.free_roads_remaining) / norm::FREEROADS);
 
     // ----- Trade scratch -----
+    const bool trade_open = s.trade_proposer != NO_PLAYER;
+    const bool own_private_draft = !trade_open && self == s.current_player;
+    const bool bundle_visible = trade_open || own_private_draft;
     // trade_proposer: 5 slots [self, +1, +2, +3, none]
-    if (s.trade_proposer == NO_PLAYER) w.onehot(4, 5);
-    else                                w.onehot(int(relseat(self, s.trade_proposer)), 5);
+    if (!trade_open) w.onehot(4, 5);
+    else             w.onehot(int(relseat(self, s.trade_proposer)), 5);
     // trade_give and trade_want: 5 resource counts each
-    for (uint8_t r = 0; r < NUM_RESOURCES; ++r) w.put(float(s.trade_give[r]) / norm::TRADE);
-    for (uint8_t r = 0; r < NUM_RESOURCES; ++r) w.put(float(s.trade_want[r]) / norm::TRADE);
+    if (bundle_visible) {
+        for (uint8_t r = 0; r < NUM_RESOURCES; ++r)
+            w.put(float(s.trade_give[r]) / norm::TRADE);
+        for (uint8_t r = 0; r < NUM_RESOURCES; ++r)
+            w.put(float(s.trade_want[r]) / norm::TRADE);
+    } else {
+        w.zero(2 * NUM_RESOURCES);
+    }
 
     // Per-opponent response: 4-slot one-hot [PENDING, ACCEPT, DECLINE, N/A]
     for (uint8_t rel = 1; rel < NUM_PLAYERS; ++rel) {
         uint8_t pl = uint8_t((self + rel) & 0x3);
-        uint8_t v = uint8_t((s.trade_response >> (2 * pl)) & 0x3);
+        uint8_t v = trade_open
+            ? uint8_t((s.trade_response >> (2 * pl)) & 0x3)
+            : uint8_t(3);  // no public offer: response is N/A
         w.onehot(int(v), 4);
     }
 

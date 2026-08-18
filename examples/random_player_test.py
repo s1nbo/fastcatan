@@ -33,7 +33,7 @@ def play_one(game_id, seed, max_steps, players, log_f):
 
     for step_idx in range(max_steps):
         env.action_mask(mask)
-        player_idx = env.current_player
+        player_idx = env.actor_to_act
         phase = env.phase
         turn = env.turn_count
         action = players[player_idx].act(env, mask)

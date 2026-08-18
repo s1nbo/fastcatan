@@ -273,10 +273,11 @@ int prune_actions(const GameState& s, const BoardLayout& b,
         // catanatron-AB robs one fixed opponent all game. The native default
         // spans all enemies (more sensible, but mispredicts catanatron's
         // robber 75% of the time — model_divergence.py 2026-06-06).
-        uint8_t enemy = uint8_t((s.current_player + 1) & 0x3);
+        const uint8_t actor = actor_to_act(s);
+        uint8_t enemy = uint8_t((actor + 1) & 0x3);
         bool single_enemy_tiles = false;
         if (chance_mode == CHANCE_CATANATRON) {
-            enemy = (s.current_player == 0) ? 1 : 0;   // first non-self seat
+            enemy = (actor == 0) ? 1 : 0;   // first non-self seat
             single_enemy_tiles = true;
         }
         // Hexes adjacent to enemy buildings (one enemy in faithful mode).
@@ -285,7 +286,7 @@ int prune_actions(const GameState& s, const BoardLayout& b,
             uint8_t nb = s.node[node];
             if (node_level(nb) == NODE_EMPTY) continue;
             uint8_t owner = node_owner(nb);
-            if (owner == s.current_player) continue;
+            if (owner == actor) continue;
             if (single_enemy_tiles && owner != enemy) continue;
             for (uint8_t k = 0; k < topology::MAX_HEXES_PER_NODE; ++k) {
                 uint8_t h = topology::node_to_hex[node][k];
@@ -301,7 +302,7 @@ int prune_actions(const GameState& s, const BoardLayout& b,
             GameState cs = s;
             cs.robber_hex = hex;
             double our[5], opp[5];
-            player_production(cs, b, s.current_player, our);
+            player_production(cs, b, actor, our);
             player_production(cs, b, enemy, opp);
             double impact = value_production_sum(opp, true) - value_production_sum(our, true);
             if (impact > best_impact) { best_impact = impact; best_robber = in[i]; }
@@ -369,7 +370,7 @@ double alphabeta(const GameState& s, const BoardLayout& b, uint8_t pov,
     int na = get_actions(s, b, prune, banned, actions, chance_mode);
     if (na == 0) return ab_value(s, b, pov, W);
 
-    bool maximizing = (s.current_player == pov);
+    bool maximizing = (actor_to_act(s) == pov);
     GameState children[MAX_EXPAND_OUTCOMES];
     double probas[MAX_EXPAND_OUTCOMES];
 

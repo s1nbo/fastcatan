@@ -39,7 +39,7 @@ namespace catan {
                            float* rewards_out,
                            uint8_t* dones_out) noexcept;
 
-    // Write obs from each env's current_player POV. `out` length n*OBS_SIZE.
+    // Write obs from each env's actor_to_act POV. `out` length n*OBS_SIZE.
     void batched_env_write_obs(const BatchedEnv& env, float* out) noexcept;
 
     // Write legal-action mask for every env. `out` length n*MASK_WORDS.
@@ -64,7 +64,7 @@ namespace catan {
     inline constexpr uint32_t SKIP_ACTION = 0xFFFFFFFFu;
 
     // Ints per row of batched_env_write_sigs:
-    // [current_player, phase, flag, dice_roll, handsize0..3, vp0..3].
+    // [actor_to_act, phase, flag, dice_roll, handsize0..3, vp0..3].
     inline constexpr int SIG_INTS = 12;
 
     // Serialize every env into `out` (n * SNAPSHOT_BYTES, row i = env i).
@@ -106,8 +106,8 @@ namespace catan {
     // via handsizes, VP dev-draws via vps).
     void batched_env_write_sigs(const BatchedEnv& env, int32_t* out) noexcept;
 
-    // Native AlphaBeta pick for every env's CURRENT player, one OpenMP pass:
-    // out[i] = ab_decide(states[i], layouts[i], states[i].current_player,
+    // Native AlphaBeta pick for every env's acting player, one OpenMP pass:
+    // out[i] = ab_decide(states[i], layouts[i], actor_to_act(states[i]),
     // depth, prune, nullptr, banned). 0xFFFFFFFF where no legal action.
     // `banned` optional uint64[MASK_WORDS] (see search.hpp). This is the
     // batched opponent/in-tree-advance primitive for training vs AB — the

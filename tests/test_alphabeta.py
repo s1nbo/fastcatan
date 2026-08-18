@@ -51,7 +51,7 @@ def test_ab_value_does_not_mutate_state():
     _advance(env, random.Random(2), 30)
     before = env.snapshot()
     env.ab_value(0)
-    env.ab_decide(env.current_player, 2, False)
+    env.ab_decide(env.actor_to_act, 2, False)
     assert env.snapshot() == before  # search works on copies
 
 
@@ -65,7 +65,7 @@ def test_ab_decide_returns_legal(depth, prune):
         legal = _legal(env)
         if not legal:
             break
-        a = env.ab_decide(env.current_player, depth, prune)
+        a = env.ab_decide(env.actor_to_act, depth, prune)
         assert a != 0xFFFFFFFF, "ab_decide found no action on a non-empty state"
         assert a in legal, f"ab_decide returned illegal action {a}"
         # advance with a random move so we probe many distinct states
@@ -84,7 +84,7 @@ def test_ab_decide_single_action_shortcut():
     for _ in range(300):
         legal = _legal(env)
         if len(legal) == 1:
-            assert env.ab_decide(env.current_player, 2, False) == legal[0]
+            assert env.ab_decide(env.actor_to_act, 2, False) == legal[0]
             return
         env.step(rng.choice(legal))
         if env.phase == 3:
@@ -102,7 +102,7 @@ def _winrate_vs_random(depth, prune, n_games, seed0=1000):
             legal = _legal(env)
             if not legal:
                 break
-            if env.current_player == 0:
+            if env.actor_to_act == 0:
                 a = env.ab_decide(0, depth, prune)
                 if a == 0xFFFFFFFF or a not in legal:
                     a = rng.choice(legal)

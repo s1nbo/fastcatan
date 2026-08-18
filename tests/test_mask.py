@@ -30,8 +30,8 @@ def test_mask_bits_within_action_range():
         assert 0 <= aid < fastcatan.NUM_ACTIONS, f"out-of-range action ID in mask: {aid}"
 
 
-def test_illegal_action_is_noop():
-    """Pick an action NOT in the mask; snapshot must be byte-identical after step."""
+def test_every_illegal_action_is_noop():
+    """Every action outside the mask must leave state and RNG byte-identical."""
     rng = random.Random(99)
     env = fastcatan.Env()
     env.reset(99)
@@ -51,9 +51,25 @@ def test_illegal_action_is_noop():
     assert illegals, "every action legal — cannot test illegal no-op"
 
     snap_before = env.snapshot()
-    reward, done = env.step(illegals[0])
-    snap_after = env.snapshot()
-    assert snap_before == snap_after, "illegal action mutated state (expected no-op)"
+    for action in illegals:
+        env.load_snapshot(snap_before)
+        reward, done = env.step(action)
+        assert env.snapshot() == snap_before, (
+            f"illegal action {action} mutated state (expected no-op)"
+        )
+        assert reward == 0.0
+        assert int(done) == 0
+
+
+def test_illegal_trade_compose_does_not_increment_budget():
+    env = fastcatan.Env()
+    env.reset(0)
+    before = env.snapshot()
+
+    reward, done = env.step(fastcatan.action.TRADE_ADD_GIVE_BASE)
+
+    assert env.snapshot() == before
+    assert env.trade_compose_count == 0
     assert reward == 0.0
     assert int(done) == 0
 

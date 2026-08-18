@@ -48,6 +48,8 @@ struct PyEnv {
     uint8_t phase() const noexcept { return uint8_t(s.phase); }
     uint8_t flag()  const noexcept { return uint8_t(s.flag); }
     uint8_t current_player() const noexcept { return s.current_player; }
+    uint8_t discarding_player() const noexcept { return s.discarding_player; }
+    uint8_t actor() const noexcept { return actor_to_act(s); }
     uint8_t dice_roll() const noexcept { return s.dice_roll; }
     uint16_t turn_count() const noexcept { return s.turn_count; }
 
@@ -146,6 +148,7 @@ Determinism: same seed -> same trajectory. Perft hashes pinned.
     // --- Sizes / constants ---
     m.attr("OBS_SIZE")    = OBS_SIZE;       // float32 features per env
     m.attr("OBS_FULL_SIZE") = OBS_FULL_SIZE;  // OBS_SIZE + hidden-enemy appendix
+    m.attr("OBS_SEMANTICS_VERSION") = OBS_SEMANTICS_VERSION;
     m.attr("MASK_WORDS")  = MASK_WORDS;     // uint64 words in legal-action mask
     m.attr("NUM_ACTIONS") = NUM_ACTIONS;    // total flat action IDs
     m.attr("NUM_PLAYERS") = uint32_t(4);
@@ -201,7 +204,11 @@ Determinism: same seed -> same trajectory. Perft hashes pinned.
              "3=ROBBER_STEAL, 4=YEAR_OF_PLENTY, 5=MONOPOLY, 6=PLACE_ROAD, "
              "7=TRADE_PENDING).")
         .def_prop_ro("current_player", &PyEnv::current_player,
-             "Active player index 0..3.")
+             "Turn owner index 0..3; use actor_to_act for policy routing.")
+        .def_prop_ro("discarding_player", &PyEnv::discarding_player,
+             "Seat currently discarding after a roll of 7; otherwise stale/unspecified.")
+        .def_prop_ro("actor_to_act", &PyEnv::actor,
+             "Seat that owns the next legal decision (0..3).")
         .def_prop_ro("dice_roll",      &PyEnv::dice_roll,
              "Last dice roll (2..12) or 0 if not yet rolled this turn.")
         .def_prop_ro("turn_count",     &PyEnv::turn_count,
@@ -420,7 +427,7 @@ GIL is released during execution.
              nb::arg("out"),
              R"(Fill (num_envs, OBS_SIZE) float32 buffer in place.
 
-Each row is the obs from that env's CURRENT player's POV (POV-relative
+Each row is the obs from that env's ACTING player's POV (POV-relative
 encoding: own slot at 0, opponents at +1/+2/+3 in seat order).
 )")
         .def("write_obs_pov",
@@ -461,7 +468,12 @@ roughly free vs full recompute.
              [](const PyBatchedEnv& e, uint32_t i) -> uint8_t {
                  return e.inner.states[i].current_player;
              }, nb::arg("env_idx"),
-             "Active player (0..3) for env ``env_idx``.")
+             "Turn owner (0..3) for env ``env_idx``.")
+        .def("actor_to_act",
+             [](const PyBatchedEnv& e, uint32_t i) -> uint8_t {
+                 return ::catan::actor_to_act(e.inner.states[i]);
+             }, nb::arg("env_idx"),
+             "Seat owning the next legal decision in env ``env_idx``.")
         .def("player_vp",
              [](const PyBatchedEnv& e, uint32_t i, uint32_t pl) -> uint8_t {
                  return e.inner.states[i].player_vp[pl];
@@ -558,7 +570,7 @@ counter. GIL released.)")
              nb::arg("povs"), nb::arg("out"),
              "Fill (num_envs, OBS_SIZE) float32: row i is env i's obs from "
              "``povs[i]``'s POV (vs ``write_obs`` which fixes "
-             "current_player).")
+             "actor_to_act).")
         .def("write_obs_all4",
              [](PyBatchedEnv& e, ArrF32_3D out) {
                  if (out.shape(0) != e.inner.n || out.shape(1) != 4
@@ -606,8 +618,8 @@ counter. GIL released.)")
              },
              nb::arg("depth"), nb::arg("prune"), nb::arg("banned_mask"),
              nb::arg("out"),
-             "Native AB pick for every env's CURRENT player in one OpenMP "
-             "pass: out[i] = ab_decide(env i, current_player, depth, prune, "
+             "Native AB pick for every env's acting player in one OpenMP "
+             "pass: out[i] = ab_decide(env i, actor_to_act, depth, prune, "
              "banned_mask). 0xFFFFFFFF where no legal action. The batched "
              "opponent primitive for training/searching vs AB.")
         .def("ab_decide_batch",
@@ -631,7 +643,7 @@ counter. GIL released.)")
              nb::arg("out"),
              R"(Fill (num_envs, SIG_INTS) int32 decision/chance signatures.
 
-Row layout: [current_player, phase, flag, dice_roll, handsize0..3, vp0..3]
+Row layout: [actor_to_act, phase, flag, dice_roll, handsize0..3, vp0..3]
 — the fields the Python MCTS ``_signature`` reads, in one OpenMP pass.
 Use ``row.tobytes()`` as a chance-outcome key.)");
 }

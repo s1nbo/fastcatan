@@ -83,7 +83,7 @@ def _sigs(be) -> np.ndarray:
 
 def _env_sig_row(env: "fc.Env") -> list[int]:
     return (
-        [env.current_player, env.phase, env.flag, env.dice_roll]
+        [env.actor_to_act, env.phase, env.flag, env.dice_roll]
         + [env.player_handsize(p) for p in range(4)]
         + [env.player_vp(p) for p in range(4)]
     )

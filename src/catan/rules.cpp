@@ -1016,6 +1016,7 @@ inline uint8_t set_tr(uint8_t resp, uint8_t p, uint8_t v) noexcept {
 inline bool trade_scratch_valid(const GameState& s) noexcept {
     bool give_any = false, want_any = false;
     for (uint8_t r = 0; r < NUM_RESOURCES; ++r) {
+        if (s.trade_give[r] > 0 && s.trade_want[r] > 0) return false;
         if (s.trade_give[r] > 0) give_any = true;
         if (s.trade_want[r] > 0) want_any = true;
     }
@@ -1044,6 +1045,7 @@ inline void handle_trade_add_give(GameState& s, uint32_t action) noexcept {
     if (s.dice_roll == 0) return;
     uint32_t r = action - action::TRADE_ADD_GIVE_BASE;
     if (r >= NUM_RESOURCES) return;
+    if (s.trade_want[r] > 0) return;  // cannot give and request same resource
     uint8_t pl = s.current_player;
     if (s.player_resources[pl][r] <= s.trade_give[r]) return;  // can't give what you don't own
     s.trade_give[r] += 1;
@@ -1053,6 +1055,7 @@ inline void handle_trade_add_want(GameState& s, uint32_t action) noexcept {
     if (s.dice_roll == 0) return;
     uint32_t r = action - action::TRADE_ADD_WANT_BASE;
     if (r >= NUM_RESOURCES) return;
+    if (s.trade_give[r] > 0) return;  // cannot give and request same resource
     if (s.trade_want[r] >= 19) return;  // cap to bank max
     s.trade_want[r] += 1;
 }
@@ -1288,8 +1291,20 @@ void step_one(GameState& s, const BoardLayout& b, uint32_t action,
     reward = 0.0f;
     done = 0;
 
+    // Public API guarantee: a masked action cannot mutate state or RNG. Live
+    // states take the fast cached-mask path. A freshly injected research state
+    // may carry a stale/empty cached mask, so recompute only on a cache miss.
+    if (action >= NUM_ACTIONS
+        || !(s.action_mask[action >> 6] & (uint64_t(1) << (action & 63)))) {
+        if (action >= NUM_ACTIONS) return;
+        uint64_t fresh[MASK_WORDS];
+        compute_mask(s, b, fresh);
+        if (!(fresh[action >> 6] & (uint64_t(1) << (action & 63)))) return;
+        std::memcpy(s.action_mask, fresh, sizeof(fresh));
+    }
+
     Phase phase_before = s.phase;
-    uint8_t actor = s.current_player;
+    uint8_t actor = actor_to_act(s);
 
     // Per-turn trade-compose budget (see MAX_TRADE_COMPOSE_PER_TURN, state.hpp):
     // reset on ROLL/END_TURN, count compose actions otherwise.
@@ -1746,10 +1761,11 @@ static inline void recompute_full(const GameState& s,
     bool compose_ok = s.trade_compose_count < MAX_TRADE_COMPOSE_PER_TURN;
     if (compose_ok) {
         for (uint8_t r = 0; r < NUM_RESOURCES; ++r) {
-            if (s.player_resources[pl][r] > s.trade_give[r]) {
+            if (s.trade_want[r] == 0
+                && s.player_resources[pl][r] > s.trade_give[r]) {
                 set_bit(action::TRADE_ADD_GIVE_BASE + r);
             }
-            if (s.trade_want[r] < 19) {
+            if (s.trade_give[r] == 0 && s.trade_want[r] < 19) {
                 set_bit(action::TRADE_ADD_WANT_BASE + r);
             }
         }

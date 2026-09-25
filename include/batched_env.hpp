@@ -39,6 +39,13 @@ namespace catan {
                                     const uint32_t* actions,
                                     uint8_t* dones_out) noexcept;
 
+    // Play exactly `num_games` fresh games with uniformly random legal actions.
+    // Work is distributed across the batch slots and remains entirely native.
+    // Returns the number of completed games and writes the total action count.
+    uint64_t batched_env_run_random_games(BatchedEnv& env,
+                                          uint64_t num_games,
+                                          uint64_t& total_steps) noexcept;
+
     // Write legal-action mask for every env. `out` length n*MASK_WORDS.
     void batched_env_write_masks(const BatchedEnv& env, uint64_t* out) noexcept;
 

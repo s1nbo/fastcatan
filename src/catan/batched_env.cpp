@@ -2,6 +2,8 @@
 #include "rules.hpp"
 #include "mask.hpp"
 
+#include <algorithm>
+#include <bit>
 #include <cstdlib>
 #include <cstring>
 #include <limits>
@@ -12,9 +14,33 @@ namespace catan {
 namespace {
 
 // Stable per-env seed derivation. SplitMix64 of (master, env_id).
-inline uint64_t derive_seed(uint64_t master, uint32_t i) noexcept {
-    uint64_t x = master ^ (uint64_t(i) * 0x9E3779B97F4A7C15ULL);
+inline uint64_t derive_seed(uint64_t master, uint64_t i) noexcept {
+    uint64_t x = master ^ (i * 0x9E3779B97F4A7C15ULL);
     return splitmix64(x);
+}
+
+inline uint32_t pick_random_legal(const uint64_t mask[MASK_WORDS],
+                                  Xoshiro128& rng) noexcept {
+    uint32_t count = 0;
+    for (uint32_t word = 0; word < MASK_WORDS; ++word)
+        count += uint32_t(std::popcount(mask[word]));
+    if (count == 0) return NUM_ACTIONS;
+
+    uint32_t target = rng.bounded(count);
+    for (uint32_t word = 0; word < MASK_WORDS; ++word) {
+        uint64_t bits = mask[word];
+        const uint32_t word_count = uint32_t(std::popcount(bits));
+        if (target >= word_count) {
+            target -= word_count;
+            continue;
+        }
+        while (target > 0) {
+            bits &= bits - 1;
+            --target;
+        }
+        return word * 64u + uint32_t(std::countr_zero(bits));
+    }
+    return NUM_ACTIONS;
 }
 
 template <typename T>
@@ -118,6 +144,50 @@ void batched_env_step_autoreset(BatchedEnv& env,
         }
     }
     env.seed_counter += env.n;
+}
+
+uint64_t batched_env_run_random_games(BatchedEnv& env,
+                                      uint64_t num_games,
+                                      uint64_t& total_steps) noexcept {
+    const uint32_t active_slots = uint32_t(std::min<uint64_t>(env.n, num_games));
+    const uint64_t seed_base = env.seed_counter;
+    uint64_t completed = 0;
+    total_steps = 0;
+
+#ifdef FCATAN_HAVE_OPENMP
+    #pragma omp parallel for schedule(dynamic, 1) reduction(+:completed,total_steps)
+#endif
+    for (int32_t slot = 0; slot < int32_t(active_slots); ++slot) {
+        GameState& state = env.states[slot];
+        BoardLayout& layout = env.layouts[slot];
+        const uint64_t games_for_slot =
+            (num_games - 1 - uint32_t(slot)) / active_slots + 1;
+        for (uint64_t index = 0; index < games_for_slot; ++index) {
+            const uint64_t game = uint32_t(slot) + index * active_slots;
+            const uint64_t seed = derive_seed(seed_base, game);
+            reset_one(state, layout, seed);
+
+            Xoshiro128 picker;
+            xoshiro_seed(picker, seed ^ 0xD1B54A32D192ED03ULL);
+
+            bool done = false;
+            while (!done) {
+                const uint32_t action = pick_random_legal(
+                    state.action_mask, picker);
+                if (action == NUM_ACTIONS) break;
+                done = step_one(state, layout, action);
+                ++total_steps;
+            }
+
+            if (done) {
+                env.last_winner[slot] = winner_of(state);
+                ++completed;
+            }
+        }
+    }
+
+    env.seed_counter += num_games;
+    return completed;
 }
 
 void batched_env_write_masks(const BatchedEnv& env, uint64_t* out) noexcept {

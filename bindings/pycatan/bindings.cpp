@@ -589,6 +589,21 @@ NB_MODULE(_fastcatan, m) {
         }, nb::arg("actions"), nb::arg("dones_out"),
         "Step every game and immediately reset terminal slots. Read "
         "last_winner after a reported terminal transition.")
+        .def("run_random_games", [](PyBatchedEnv& e, uint64_t num_games) {
+            e.require_initialized();
+            if (num_games == 0)
+                throw std::runtime_error("num_games must be positive");
+            uint64_t total_steps = 0;
+            uint64_t completed = 0;
+            {
+                nb::gil_scoped_release release;
+                completed = batched_env_run_random_games(
+                    e.inner, num_games, total_steps);
+            }
+            return nb::make_tuple(completed, total_steps);
+        }, nb::arg("num_games"),
+        "Run fresh games with uniformly random legal actions entirely in C++. "
+        "Return (completed_games, total_steps).")
         .def("write_masks", [](const PyBatchedEnv& e, ArrU64_2D out) {
             e.require_initialized();
             if (out.shape(0) != e.inner.n || out.shape(1) != MASK_WORDS)

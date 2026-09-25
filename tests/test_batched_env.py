@@ -163,3 +163,30 @@ def test_no_action_preserves_live_slot() -> None:
     batch.step(actions, dones)
     assert dones.tolist() == [0]
     assert batch.snapshot(0) == before
+
+
+def test_native_random_rollout_completes_exact_games_deterministically() -> None:
+    first = fastcatan.BatchedEnv(N, seed=19)
+    second = fastcatan.BatchedEnv(N, seed=19)
+    first.reset()
+    second.reset()
+
+    first_result = first.run_random_games(32)
+    second_result = second.run_random_games(32)
+
+    assert first_result == second_result
+    assert first_result[0] == 32
+    assert first_result[1] > first_result[0]
+    assert [first.snapshot(i) for i in range(N)] == [
+        second.snapshot(i) for i in range(N)
+    ]
+
+
+def test_native_random_rollout_validates_lifecycle_and_count() -> None:
+    batch = fastcatan.BatchedEnv(2)
+    with pytest.raises(RuntimeError, match="not reset"):
+        batch.run_random_games(1)
+
+    batch.reset()
+    with pytest.raises(RuntimeError, match="positive"):
+        batch.run_random_games(0)

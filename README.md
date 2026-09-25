@@ -153,11 +153,16 @@ cmake --build build -j
 ctest --test-dir build --output-on-failure
 ```
 
-Run the simulator-only batch benchmark with:
+Run the uniformly random-agent benchmark to measure completed games per second:
 
 ```bash
-python examples/benchmark_simulator.py --envs 1024 --steps 200
+python examples/benchmark_simulator.py
 ```
+
+The random policy and complete-game rollout run entirely in C++, so the result
+measures simulator throughput rather than Python action-selection overhead. Use
+`--envs`, `--games`, and `--seed` to change the batch size, completed-game count,
+and random seed.
 
 ## License
 

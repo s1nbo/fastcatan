@@ -1,4 +1,4 @@
-// tests/fuzz_invariants.cpp — 10^7-game invariant fuzz (M1 correctness gate).
+// tests/fuzz_invariants.cpp — high-volume simulator invariant fuzzing.
 //
 // Plays random-legal games entirely in C++ and checks per-step game invariants:
 //   * phase / current_player in valid range
@@ -8,26 +8,10 @@
 //     fields count *remaining* pieces, so this also catches uint8 underflow
 //   * bank + sum(player resources) conserved at 19 per resource type
 //   * a non-empty legal-action mask at every step
-//   * terminal state has a winner (some player VP >= 10)
+//   * terminal state has a winner or reached the turn limit
 //
-// These INVARIANT VIOLATIONS are the correctness gate; any one is a rule bug
-// and exits nonzero. Distinct from that: a game may exceed the per-game step
-// cap without terminating. Under *uniform-random* play this is NOT a rule
-// defect — it is one of two rule-correct situations, and every per-step
-// invariant still holds up to the cap:
-//   1. Heavy tail — a finite but very long game (the trade sub-phase lets
-//      random play wander). Replaying with a larger cap terminates normally
-//      (e.g. seed 1366915 ends at 194018 steps, 0 violations).
-//   2. Deadlock — the board is built out AND the dev deck is exhausted, so the
-//      last 1-2 VP are unreachable for every player (no affordable/legal build
-//      remains; longest-road and largest-army are already assigned). Max VP
-//      across all players stays < 10 forever, so there is no winner (e.g. seed
-//      2446268: 10^8 steps, no player's VP ever exceeds 9). step_one has no
-//      "no-progress" terminal, so such a game never ends on its own; at the RL
-//      level this is handled by the episode step cap in models/env.py
-//      (MAX_EPISODE_STEPS), which truncates a no-winner game and scores it -1.
-// Capped games are counted and the longest is reported; they do NOT fail the
-// gate — only true invariant violations do.
+// Invariant violations exit nonzero. A game may exceed the configured step cap
+// under random play; capped games are reported but do not fail the run.
 //
 // Mirrors tests/test_invariants.py (the readable spec) but runs the full
 // 10^7-game sweep that pure Python cannot: Python ~35 games/s/core (per-step
@@ -151,8 +135,7 @@ int main(int argc, char** argv) {
 
             if (const char* msg = check_invariants(s)) { record_violation(gseed, 0, msg); continue; }
 
-            float    reward = 0.0f;
-            uint8_t  done   = 0;
+            bool     done   = false;
             uint64_t steps  = 0;
             bool     bad    = false;
 
@@ -160,7 +143,7 @@ int main(int argc, char** argv) {
                 bool empty = false;
                 const uint32_t a = pick_random_legal(s.action_mask, picker, empty);
                 if (empty) { record_violation(gseed, steps, "empty legal-action mask"); bad = true; break; }
-                step_one(s, b, a, reward, done);
+                done = step_one(s, b, a);
                 ++steps;
                 if (const char* msg = check_invariants(s)) { record_violation(gseed, steps, msg); bad = true; break; }
                 if (done) break;
@@ -177,7 +160,11 @@ int main(int argc, char** argv) {
             }
             uint8_t mx = 0;
             for (int p = 0; p < NUM_PLAYERS; ++p) mx = std::max(mx, s.player_vp[p]);
-            if (mx < WIN_VP) { record_violation(gseed, steps, "terminated without a winner (max VP < 10)"); continue; }
+            if (mx < WIN_VP && s.turn_count < MAX_TURNS) {
+                record_violation(gseed, steps,
+                                 "terminated without a winner before turn limit");
+                continue;
+            }
 
             games_done.fetch_add(1, std::memory_order_relaxed);
         }

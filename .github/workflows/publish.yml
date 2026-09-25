@@ -1,18 +1,53 @@
-name: build & publish
+name: test, build & publish
 
-# Build the abi3 wheel + sdist and publish to PyPI on a version tag (v1.0.0, …).
+# Test every change. Build the abi3 wheels + sdist for manual runs and version
+# tags, then publish tagged releases to PyPI.
 # Uses PyPI Trusted Publishing (OIDC) — no API token/secret needed once the
 # publisher is configured at https://pypi.org/manage/project/fastcatan/settings/publishing/
 # workflow_dispatch runs the build only (no publish) for a dry run.
 
 on:
   push:
+    branches: [main]
     tags: ["v*"]
+  pull_request:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
+  verify:
+    name: source tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Verify release tag matches package version
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          PACKAGE_VERSION="$(python -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')"
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          test "$TAG_VERSION" = "$PACKAGE_VERSION" || {
+            echo "Tag v$TAG_VERSION does not match package version $PACKAGE_VERSION"
+            exit 1
+          }
+      - name: Install and run Python tests
+        run: |
+          python -m pip install . pytest
+          python -m pytest
+      - name: Build and run standalone C++ tests
+        run: |
+          cmake -S . -B build/standalone -DFASTCATAN_ARCH=off -DCMAKE_BUILD_TYPE=Release
+          cmake --build build/standalone --parallel
+          ctest --test-dir build/standalone --output-on-failure
+
   build_wheels:
     name: wheels ${{ matrix.name }}
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
+    needs: verify
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -28,9 +63,9 @@ jobs:
           # Intel mac (macos-13 / x86_64) intentionally dropped. Intel-mac users
           # build from the sdist.
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Build wheels
-        uses: pypa/cibuildwheel@v2.21
+        uses: pypa/cibuildwheel@v4.2.0
         env:
           # macOS: pick arch + portable -march + deployment target per runner.
           # (Linux arch stays x86-64-v2 from pyproject.) Empty on Linux = no-op.
@@ -44,11 +79,18 @@ jobs:
 
   build_sdist:
     name: sdist
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
+    needs: verify
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
       - name: Build sdist
-        run: pipx run build --sdist
+        run: |
+          python -m pip install build
+          python -m build --sdist
       - uses: actions/upload-artifact@v4
         with:
           name: cibw-sdist
@@ -58,10 +100,11 @@ jobs:
     name: publish to PyPI
     # only on a tag, and only after wheel + sdist succeed
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
-    needs: [build_wheels, build_sdist]
+    needs: [verify, build_wheels, build_sdist]
     runs-on: ubuntu-latest
     environment: pypi
     permissions:
+      contents: read
       id-token: write        # OIDC token for trusted publishing
     steps:
       - uses: actions/download-artifact@v4

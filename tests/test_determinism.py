@@ -10,7 +10,7 @@ from tests.conftest import legal_actions
 
 
 def _record_trajectory(seed: int, max_steps: int = 100_000):
-    """Replay a random-policy game and record (action, reward, done, turn, cp) per step."""
+    """Replay random legal moves and record the resulting trajectory."""
     rng = random.Random(seed)
     env = fastcatan.Env()
     env.reset(seed)
@@ -22,8 +22,8 @@ def _record_trajectory(seed: int, max_steps: int = 100_000):
         action = rng.choice(legals)
         cp = env.current_player
         turn = env.turn_count
-        reward, done = env.step(action)
-        trace.append((action, reward, int(done), turn, cp))
+        done = env.step(action)
+        trace.append((action, int(done), turn, cp))
         if done:
             break
     final_vps = tuple(env.player_vp(p) for p in range(4))
@@ -70,9 +70,9 @@ def test_snapshot_roundtrip_matches_live_env():
     env_b = fastcatan.Env()
     env_b.load_snapshot(snap)
 
-    ra, da = env_a.step(action)
-    rb, db = env_b.step(action)
-    assert (ra, da) == (rb, db)
+    done_a = env_a.step(action)
+    done_b = env_b.step(action)
+    assert done_a == done_b
     assert env_a.current_player == env_b.current_player
     assert env_a.turn_count == env_b.turn_count
     for p in range(4):

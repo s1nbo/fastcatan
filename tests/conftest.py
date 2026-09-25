@@ -24,7 +24,7 @@ def legal_actions(mask: np.ndarray) -> list[int]:
 
 
 def play_random_game(seed: int, max_steps: int = MAX_STEPS, on_step=None):
-    """Play one full random-policy game. Optional `on_step(env, mask, action, step_idx)` hook."""
+    """Play one full game using random legal moves."""
     rng = random.Random(seed)
     env = fastcatan.Env()
     env.reset(seed)
@@ -37,7 +37,7 @@ def play_random_game(seed: int, max_steps: int = MAX_STEPS, on_step=None):
         action = rng.choice(legals)
         if on_step is not None:
             on_step(env, mask_buf, action, step_idx)
-        _, done = env.step(action)
+        done = env.step(action)
         if done:
             return env, step_idx + 1
     raise AssertionError(f"game did not terminate in {max_steps} steps (seed={seed})")

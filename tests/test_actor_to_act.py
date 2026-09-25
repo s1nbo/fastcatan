@@ -33,7 +33,7 @@ def _first_cross_seat_discard() -> fastcatan.Env:
         env.action_mask(mask)
         legal = _legal_actions(mask)
         assert legal
-        _, done = env.step(rng.choice(legal))
+        done = env.step(rng.choice(legal))
         assert not done, "seed-0 fixture ended before reaching discard state"
 
     raise AssertionError("seed-0 fixture did not reach a cross-seat discard")
@@ -44,23 +44,3 @@ def test_actor_to_act_uses_discarding_player() -> None:
 
     assert env.current_player != env.discarding_player
     assert env.actor_to_act == env.discarding_player
-
-
-def test_batched_default_obs_and_signature_use_actor_to_act() -> None:
-    env = _first_cross_seat_discard()
-    snapshot = np.frombuffer(env.snapshot(), dtype=np.uint8).copy()[None, :]
-
-    batch = fastcatan.BatchedEnv(1, 123)
-    batch.load_snapshots(snapshot)
-
-    expected = np.zeros(fastcatan.OBS_SIZE, dtype=np.float32)
-    actual = np.zeros((1, fastcatan.OBS_SIZE), dtype=np.float32)
-    env.write_obs(env.actor_to_act, expected)
-    batch.write_obs(actual)
-    np.testing.assert_array_equal(actual[0], expected)
-
-    sig = np.zeros((1, fastcatan.SIG_INTS), dtype=np.int32)
-    batch.write_sigs(sig)
-    assert batch.current_player(0) == env.current_player
-    assert batch.actor_to_act(0) == env.actor_to_act
-    assert sig[0, 0] == env.actor_to_act

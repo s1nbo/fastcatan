@@ -34,7 +34,7 @@ def _state_with_give_action() -> tuple[fastcatan.Env, int, np.ndarray]:
         if give:
             return env, give[0] - fastcatan.action.TRADE_ADD_GIVE_BASE, mask
         assert legal
-        _, done = env.step(rng.choice(legal))
+        done = env.step(rng.choice(legal))
         assert not done
 
     raise AssertionError("seed-17 fixture never reached trade composition")
@@ -49,7 +49,6 @@ def test_trade_cannot_request_a_resource_already_offered() -> None:
     assert same_resource_want not in legal
 
     before = env.snapshot()
-    reward, done = env.step(same_resource_want)
+    done = env.step(same_resource_want)
     assert env.snapshot() == before
-    assert reward == 0.0
     assert int(done) == 0

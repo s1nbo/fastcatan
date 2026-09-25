@@ -1,4 +1,5 @@
 #pragma once
+#include <cstddef>
 #include <cstdint>
 #include <type_traits>
 #include "rng.hpp"
@@ -18,12 +19,12 @@ namespace catan {
     // length authority for the game; the per-turn trade-compose cap below is the
     // liveness guard that guarantees turns end, so this always fires for a
     // non-terminating game. 2000 ~= 2x the observed random-game max of 945 turns
-    // -> ample headroom for longer strong-vs-strong self-play, so it only bites
-    // genuine non-termination.
+    // -> ample headroom for ordinary games, so it only bites genuine
+    // non-termination.
     inline constexpr uint16_t MAX_TURNS    = 2000;
 
     // Per-turn player-to-player trade-compose budget -- canonical home for the
-    // trade-stall fix (Python/eval comments point here). The dominant stall is a
+    // trade-stall fix. The dominant stall is a
     // within-turn churn: ADD_WANT is legal while trade_want[r] < 19 and CANCEL
     // while the scratch is non-empty, so ADD_WANT -> CANCEL -> ADD_WANT loops
     // forever without opening a trade or ending the turn -- turn_count (bumped
@@ -31,12 +32,11 @@ namespace catan {
     // actions (TRADE_ADD_GIVE..TRADE_OPEN) in one turn, compute_mask masks the
     // compose block off (CANCEL/build/bank-trade/END_TURN stay legal, so the mask
     // is never emptied), forcing the turn to progress so turn_count advances and
-    // MAX_TURNS can fire. Applied uniformly to every seat by the simulator, so
-    // train, self-play, gate and eval inherit it with no per-driver bookkeeping.
+    // MAX_TURNS can fire. Applied uniformly to every seat by the simulator.
     // A real offer is a few ADD_* + OPEN, so only churn ever reaches this.
     inline constexpr uint8_t MAX_TRADE_COMPOSE_PER_TURN = 50;
 
-    // node[] encoding: bits 0-1 = level, bits 2-4 = owner.
+    // node[] encoding: bits 0-1 = level, bits 2-3 = owner.
     inline constexpr uint8_t NODE_EMPTY      = 0;
     inline constexpr uint8_t NODE_SETTLEMENT = 1;
     inline constexpr uint8_t NODE_CITY       = 2;
@@ -84,7 +84,7 @@ namespace catan {
     };
 
     // ---------------------------------------------------------------------
-    // GameState: dynamic per-step state. 64-byte aligned, 256 bytes total
+    // GameState: dynamic per-step state. 64-byte aligned, 384 bytes total.
     // ---------------------------------------------------------------------
     struct alignas(64) GameState {
         // --- Board state ---
@@ -143,19 +143,17 @@ namespace catan {
 
         // --- Incrementally maintained legal-action mask (320 bits over 5 words) ---
         // Updated after every step_one. Consumers read this directly instead
-        // of paying for a full recompute. PLAN.md M3 deliverable.
+        // of paying for a full recompute.
         uint64_t action_mask[5];
 
         // --- Longest-road component membership (one 54-bit set per player) ---
         // Bit n set => node n is a valid longest-road path endpoint for the
         // player. A node joins the player's set when the player builds an
         // incident road (or settlement) while the node is NOT enemy-occupied,
-        // and is never removed thereafter. This mirrors catanatron's
-        // connected-component bookkeeping (board.py build_road/build_settlement)
-        // and is what makes a road segment terminating at an opponent building
-        // count toward longest road IFF the road was built before the opponent
-        // settled there. Without it the longest-road length diverges from
-        // catanatron (the ground-truth engine) in ~65% of random games.
+        // and is never removed thereafter. This preserves the history needed
+        // to make a road segment terminating at an opponent building
+        // count toward longest road iff the road was built before the opponent
+        // settled there.
         uint64_t road_node_member[4];
     };
 
@@ -167,10 +165,16 @@ namespace catan {
     static_assert(std::is_trivially_copyable_v<BoardLayout>,
                   "BoardLayout must be trivially copyable");
 
+    // Binary snapshots are deliberately version-local: they preserve the
+    // complete game, board, and RNG state without defining a cross-version
+    // serialization format.
+    inline constexpr std::size_t SNAPSHOT_BYTES =
+        sizeof(GameState) + sizeof(BoardLayout);
+
     // Seat that owns the next decision. During a roll-7 discard sequence the
     // turn owner remains in current_player while discarding_player advances
-    // through the affected seats; every policy-facing caller must use this
-    // helper instead of assuming that current_player always owns the action.
+    // through the affected seats; callers must not assume that current_player
+    // always owns the action.
     inline constexpr uint8_t actor_to_act(const GameState& s) noexcept {
         return s.flag == Flag::DISCARD_RESOURCES
             ? s.discarding_player

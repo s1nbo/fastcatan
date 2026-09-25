@@ -53,11 +53,10 @@ def test_every_illegal_action_is_noop():
     snap_before = env.snapshot()
     for action in illegals:
         env.load_snapshot(snap_before)
-        reward, done = env.step(action)
+        done = env.step(action)
         assert env.snapshot() == snap_before, (
             f"illegal action {action} mutated state (expected no-op)"
         )
-        assert reward == 0.0
         assert int(done) == 0
 
 
@@ -66,16 +65,15 @@ def test_illegal_trade_compose_does_not_increment_budget():
     env.reset(0)
     before = env.snapshot()
 
-    reward, done = env.step(fastcatan.action.TRADE_ADD_GIVE_BASE)
+    done = env.step(fastcatan.action.TRADE_ADD_GIVE_BASE)
 
     assert env.snapshot() == before
     assert env.trade_compose_count == 0
-    assert reward == 0.0
     assert int(done) == 0
 
 
 @pytest.mark.parametrize("seed", [0, 1, 2, 3, 4])
-def test_random_policy_only_uses_mask(seed):
+def test_random_moves_only_use_mask(seed):
     """If we *only* sample inside the mask, we should never see no-op state stalls."""
     last_snap = None
     stalls = 0

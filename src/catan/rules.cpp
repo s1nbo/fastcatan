@@ -24,8 +24,7 @@ inline bool member_node(const GameState& s, uint8_t player, uint8_t node) noexce
     return (s.road_node_member[player] >> node) & 1u;
 }
 // Mark both endpoints of a freshly built road as members, except an endpoint
-// already occupied by an opponent (catanatron never adds enemy nodes to the
-// builder's component: board.py:202,205).
+// already occupied by an opponent.
 inline void mark_road_endpoints(GameState& s, uint8_t edge_id, uint8_t player) noexcept {
     for (uint8_t i = 0; i < 2; ++i) {
         uint8_t v = topology::edge_to_node[edge_id][i];
@@ -370,9 +369,7 @@ inline void pay_to_bank(GameState& s, uint8_t player, const uint8_t cost[5]) noe
 
 // MAIN-phase road legality. The caller has already checked the edge is empty.
 // An empty edge is buildable iff it is incident to a node in the player's road
-// component (road_node_member). This matches catanatron's buildable_edges,
-// which expands from connected-component nodes over the static land graph
-// (board.py:262, 84). Component nodes are retained even after an opponent
+// component (road_node_member). Component nodes are retained even after an opponent
 // settles on them, so a road may extend from a node the player reached earlier
 // (with a settlement or a road built while the node was not enemy-occupied)
 // even if that node now carries an enemy building. Conversely a node the
@@ -447,9 +444,7 @@ inline void check_game_ended(GameState& s) noexcept {
 }
 
 // Apply the outcome of a known dice roll (sum 2..12): a 7 triggers
-// discard/robber setup; otherwise production payout. Factored out of
-// handle_roll_dice so weighted transition expansion can fork dice outcomes
-// (expectimax, see expand_action) without consuming RNG.
+// discard/robber setup; otherwise production payout.
 inline void apply_roll_outcome(GameState& s, const BoardLayout& b, uint8_t roll) noexcept {
     s.dice_roll = roll;
 
@@ -498,8 +493,7 @@ inline void apply_roll_outcome(GameState& s, const BoardLayout& b, uint8_t roll)
         }
     }
 
-    // Apply per resource. Bank-shortage rule (matches catanatron's
-    // yield_resources, apply_action.py:570-584): a resource is paid out ONLY
+    // Apply per resource. Under the bank-shortage rule, a resource is paid only
     // if the bank covers the FULL demand across all players; otherwise it is
     // "depleted" and NO player receives any of it — there is no partial payout
     // even when a single player is the sole recipient.
@@ -553,8 +547,7 @@ inline void handle_end_turn(GameState& s) noexcept {
 // =====================================================================
 
 // Move one card of resource `r` from `victim` to current_player. Caller
-// validates the victim actually holds `r`. Split out of do_steal so the
-// weighted transition expansion can fork the stolen resource without RNG.
+// validates that the victim holds `r`.
 inline void do_steal_resource(GameState& s, uint8_t victim, uint8_t r) noexcept {
     s.player_resources[victim][r]            -= 1;
     s.player_handsize[victim]                -= 1;
@@ -570,17 +563,19 @@ inline void do_steal(GameState& s, uint8_t victim) noexcept {
 
     uint32_t pick = s.rng.bounded(total);
     uint32_t cum = 0;
-    uint8_t r = 0;
-    for (r = 0; r < NUM_RESOURCES; ++r) {
-        cum += s.player_resources[victim][r];
-        if (pick < cum) break;
+    uint8_t r = NUM_RESOURCES - 1;
+    for (uint8_t candidate = 0; candidate + 1 < NUM_RESOURCES; ++candidate) {
+        cum += s.player_resources[victim][candidate];
+        if (pick < cum) {
+            r = candidate;
+            break;
+        }
     }
     do_steal_resource(s, victim, r);
 }
 
 // Distinct opponents (each holding >=1 card) with a building on the robber's
-// hex. Fills out[<=4], returns the count. Shared by resolve_post_robber (RNG
-// auto-steal) and expand_action (expectimax steal fork).
+// hex. Fills out[<=4] and returns the count.
 inline uint8_t find_robber_candidates(const GameState& s, uint8_t out[4]) noexcept {
     uint8_t n_cand = 0;
     for (uint8_t k = 0; k < topology::MAX_NODES_PER_HEX; ++k) {
@@ -713,8 +708,7 @@ inline void check_largest_army(GameState& s) noexcept {
 } 
 
 // Grant a specific drawn dev card to current_player (deck decrement + hand
-// update + VP/cooldown handling). Split out of handle_buy_dev so the search
-// can fork the draw (expectimax). Assumes payment already made and that
+// update + VP/cooldown handling). Assumes payment already made and that
 // s.dev_deck[card] > 0.
 inline void apply_buy_dev_card(GameState& s, uint8_t card) noexcept {
     uint8_t current = s.current_player;
@@ -744,10 +738,13 @@ inline void handle_buy_dev(GameState& s) noexcept {
 
     uint32_t pick = s.rng.bounded(total);
     uint32_t cum = 0;
-    uint8_t card = 0;
-    for (card = 0; card < 5; ++card) {
-        cum += s.dev_deck[card];
-        if (pick < cum) break;
+    uint8_t card = 4;
+    for (uint8_t candidate = 0; candidate < 4; ++candidate) {
+        cum += s.dev_deck[candidate];
+        if (pick < cum) {
+            card = candidate;
+            break;
+        }
     }
     apply_buy_dev_card(s, card);
 }
@@ -815,8 +812,8 @@ static uint8_t lr_dfs(const GameState& s, uint8_t player,
     }
 
     visited[edge] = false;
-    // An edge whose far (exit) node is opponent-occupied does NOT count: in
-    // catanatron you can never step onto an enemy node, so such a segment is
+    // An edge whose far (exit) node is opponent-occupied does not count: a route
+    // can never step onto an enemy node, so such a segment is
     // only ever counted by *starting* at the enemy node (handled by allowing
     // member enemy nodes as DFS roots in longest_road_for), i.e. traversing
     // it the other direction where the enemy node is the entry, not the exit.
@@ -828,8 +825,7 @@ inline uint8_t longest_road_for(const GameState& s, uint8_t player) noexcept {
     for (uint8_t v = 0; v < topology::NUM_NODES; ++v) {
         // Valid path roots are this player's component members only. This
         // includes nodes now occupied by an opponent that the player had
-        // already reached with a road (catanatron keeps them in the
-        // component), and excludes enemy nodes the player only reached after
+        // already reached with a road, and excludes enemy nodes reached after
         // the opponent settled there.
         if (!member_node(s, player, v)) continue;
 
@@ -1286,25 +1282,19 @@ inline void handle_main(GameState& s, const BoardLayout& b, uint32_t action) noe
 
 }  // namespace
 
-void step_one(GameState& s, const BoardLayout& b, uint32_t action,
-              float& reward, uint8_t& done) noexcept {
-    reward = 0.0f;
-    done = 0;
-
+bool step_one(GameState& s, const BoardLayout& b, uint32_t action) noexcept {
     // Public API guarantee: a masked action cannot mutate state or RNG. Live
-    // states take the fast cached-mask path. A freshly injected research state
-    // may carry a stale/empty cached mask, so recompute only on a cache miss.
+    // states take the fast cached-mask path. A restored state may carry a stale
+    // cached mask, so recompute only on a cache miss.
     if (action >= NUM_ACTIONS
         || !(s.action_mask[action >> 6] & (uint64_t(1) << (action & 63)))) {
-        if (action >= NUM_ACTIONS) return;
+        if (action >= NUM_ACTIONS) return s.phase == Phase::ENDED;
         uint64_t fresh[MASK_WORDS];
         compute_mask(s, b, fresh);
-        if (!(fresh[action >> 6] & (uint64_t(1) << (action & 63)))) return;
+        if (!(fresh[action >> 6] & (uint64_t(1) << (action & 63))))
+            return s.phase == Phase::ENDED;
         std::memcpy(s.action_mask, fresh, sizeof(fresh));
     }
-
-    Phase phase_before = s.phase;
-    uint8_t actor = actor_to_act(s);
 
     // Per-turn trade-compose budget (see MAX_TRADE_COMPOSE_PER_TURN, state.hpp):
     // reset on ROLL/END_TURN, count compose actions otherwise.
@@ -1328,242 +1318,149 @@ void step_one(GameState& s, const BoardLayout& b, uint32_t action,
     }
 
     // Length backstop (single length authority): end a no-winner game once it
-    // hits MAX_TURNS turns. Falls into the ENDED block below, which finds no
-    // player >= WIN_VP so reward stays 0; Python _terminal_reward maps the
-    // no-winner terminal to TIE_REWARD (-2). The trade-compose cap guarantees
-    // turns end, so turn_count advances and this is reachable.
+    // hits MAX_TURNS turns. The trade-compose cap guarantees turns end, so
+    // turn_count advances and this is reachable.
     if (s.phase != Phase::ENDED && s.turn_count >= MAX_TURNS) {
         s.phase = Phase::ENDED;
     }
 
-    if (s.phase == Phase::ENDED) {
-        done = 1;
-        // If this action triggered the terminal transition, the actor (the
-        // player whose action it was) is the winner. Reward is from actor's
-        // perspective: +1 win, 0 if game was already over.
-        if (phase_before != Phase::ENDED) {
-            // Find winner; should equal `actor` since only actor's action
-            // pushed VP over the threshold.
-            for (uint8_t p = 0; p < 4; ++p) {
-                if (s.player_vp[p] >= 10) {
-                    reward = (p == actor) ? 1.0f : -1.0f;
-                    break;
-                }
-            }
-        }
-    }
-
     recompute_full(s, b, s.action_mask);
+    return s.phase == Phase::ENDED;
 }
 
-// =====================================================================
-// Weighted transition expansion (see rules.hpp). Deterministic actions resolve
-// to one child; stochastic action classes fan out over simulator outcomes.
-// =====================================================================
+namespace {
 
-// 2d6 sum probability, sum in [2,12]: count(ways)/36 = (6 - |7-sum|)/36.
-static inline double dice_proba(uint8_t sum) noexcept {
-    int d = 7 - int(sum);
-    if (d < 0) d = -d;
-    return double(6 - d) / 36.0;
+inline bool action_is_legal(const GameState& s, const BoardLayout& b,
+                            uint32_t action_id) noexcept {
+    if (action_id >= NUM_ACTIONS) return false;
+    if (s.action_mask[action_id >> 6]
+        & (uint64_t(1) << (action_id & 63))) {
+        return true;
+    }
+    uint64_t fresh[MASK_WORDS];
+    compute_mask(s, b, fresh);
+    return fresh[action_id >> 6] & (uint64_t(1) << (action_id & 63));
 }
 
-// Mirror step_one's tail for a child produced outside the normal step path:
-// apply the MAX_TURNS length backstop, then rebuild the legal-action mask.
-static inline void finalize_child(GameState& cs, const BoardLayout& b) noexcept {
-    if (cs.phase != Phase::ENDED && cs.turn_count >= MAX_TURNS)
-        cs.phase = Phase::ENDED;
-    recompute_full(cs, b, cs.action_mask);
+inline void finalize_outcome(GameState& state,
+                             const BoardLayout& layout) noexcept {
+    if (state.phase != Phase::ENDED && state.turn_count >= MAX_TURNS)
+        state.phase = Phase::ENDED;
+    recompute_full(state, layout, state.action_mask);
 }
 
-int expand_action(const GameState& s, const BoardLayout& b, uint32_t action,
-                  GameState* out_states, double* out_probas,
-                  int chance_mode) noexcept {
-    int n = 0;
+inline double dice_probability(uint8_t sum) noexcept {
+    int distance = 7 - int(sum);
+    if (distance < 0) distance = -distance;
+    return double(6 - distance) / 36.0;
+}
 
-    // --- ROLL: fan out the 11 dice sums (a 7 routes into discard/robber). ---
-    if (action == action::ROLL_DICE) {
-        for (uint8_t sum = 2; sum <= 12; ++sum) {
-            GameState cs = s;
-            cs.trade_compose_count = 0;  // step_one resets this on ROLL
-            apply_roll_outcome(cs, b, sum);
-            finalize_child(cs, b);
-            out_states[n] = cs;
-            out_probas[n] = dice_proba(sum);
-            ++n;
-        }
-        return n;
+}  // namespace
+
+uint32_t enumerate_action_outcomes(
+    const GameState& s, const BoardLayout& b, uint32_t action_id,
+    GameState* out_states, double* out_probabilities) noexcept {
+    if (!out_states || !out_probabilities) return 0;
+
+    if (!action_is_legal(s, b, action_id)) {
+        out_states[0] = s;
+        out_probabilities[0] = 1.0;
+        return 1;
     }
 
-    // --- BUY_DEV: fan out the real remaining deck, weighted by count. ---
-    // (Catanatron also mixes in enemies' hidden devs as an info-set blur and
-    // tolerates impossible draws via try/except; we fork the true deck — the
-    // correct draw expectation — which also avoids underflowing dev_deck.)
-    if (action == action::BUY_DEV) {
+    uint32_t count = 0;
+
+    if (action_id == action::ROLL_DICE) {
+        for (uint8_t sum = 2; sum <= 12; ++sum) {
+            GameState child = s;
+            child.trade_compose_count = 0;
+            child.rng.bounded(36);
+            apply_roll_outcome(child, b, sum);
+            finalize_outcome(child, b);
+            out_states[count] = child;
+            out_probabilities[count] = dice_probability(sum);
+            ++count;
+        }
+        return count;
+    }
+
+    if (action_id == action::BUY_DEV) {
         uint16_t total = 0;
-        for (uint8_t d = 0; d < 5; ++d) total += s.dev_deck[d];
-        if (total == 0 || !can_pay(s, s.current_player, COST_DEV)) {
-            // Illegal (mask should prevent) -> engine no-ops: identity child.
-            GameState cs = s;
-            finalize_child(cs, b);
-            out_states[0] = cs;
-            out_probas[0] = 1.0;
-            return 1;
-        }
-        if (chance_mode == CHANCE_CATANATRON) {
-            // Info-set deck: remaining deck + every enemy's hidden devs
-            // (tree_search_utils: "possible deck from the perspective of the
-            // current player"). A type absent from the REAL deck yields a
-            // whiff child — their swallowed exception.
-            uint16_t blurred[5];
-            uint16_t blurred_total = 0;
-            for (uint8_t card = 0; card < 5; ++card) {
-                uint16_t c = s.dev_deck[card];
-                for (uint8_t p = 0; p < 4; ++p)
-                    if (p != s.current_player) c += s.player_dev[p][card];
-                blurred[card] = c;
-                blurred_total += c;
-            }
-            for (uint8_t card = 0; card < 5; ++card) {
-                if (blurred[card] == 0) continue;
-                GameState cs = s;
-                if (s.dev_deck[card] > 0) {
-                    pay_to_bank(cs, cs.current_player, COST_DEV);
-                    apply_buy_dev_card(cs, card);
-                }
-                finalize_child(cs, b);
-                out_states[n] = cs;
-                out_probas[n] = double(blurred[card]) / double(blurred_total);
-                ++n;
-            }
-            return n;
-        }
+        for (uint8_t card = 0; card < 5; ++card)
+            total += s.dev_deck[card];
+
         for (uint8_t card = 0; card < 5; ++card) {
             if (s.dev_deck[card] == 0) continue;
-            GameState cs = s;
-            pay_to_bank(cs, cs.current_player, COST_DEV);
-            apply_buy_dev_card(cs, card);
-            finalize_child(cs, b);
-            out_states[n] = cs;
-            out_probas[n] = double(s.dev_deck[card]) / double(total);
-            ++n;
+            GameState child = s;
+            child.rng.bounded(total);
+            pay_to_bank(child, child.current_player, COST_DEV);
+            apply_buy_dev_card(child, card);
+            finalize_outcome(child, b);
+            out_states[count] = child;
+            out_probabilities[count] =
+                double(s.dev_deck[card]) / double(total);
+            ++count;
         }
-        return n;
+        return count;
     }
 
-    // --- MOVE_ROBBER: deterministic placement, but a lone victim auto-steals
-    //     (fork the stolen resource); 0 or >=2 victims stay deterministic. ---
-    if (action >= action::MOVE_ROBBER_BASE
-        && action <  action::MOVE_ROBBER_BASE + topology::NUM_HEXES) {
-        uint8_t hex = uint8_t(action - action::MOVE_ROBBER_BASE);
-        if (hex == s.robber_hex) {  // illegal -> no-op
-            GameState cs = s;
-            finalize_child(cs, b);
-            out_states[0] = cs;
-            out_probas[0] = 1.0;
-            return 1;
-        }
+    if (action_id >= action::MOVE_ROBBER_BASE
+        && action_id < action::MOVE_ROBBER_BASE + topology::NUM_HEXES) {
         GameState base = s;
-        base.robber_hex = hex;
-        uint8_t cand[4];
-        uint8_t nc = find_robber_candidates(base, cand);
-        if (nc != 1) {
-            base.flag = (nc == 0) ? Flag::NONE : Flag::ROBBER_STEAL;
-            finalize_child(base, b);
+        base.robber_hex = uint8_t(action_id - action::MOVE_ROBBER_BASE);
+
+        uint8_t candidates[NUM_PLAYERS];
+        uint8_t candidate_count = find_robber_candidates(base, candidates);
+        if (candidate_count != 1) {
+            base.flag = candidate_count == 0
+                ? Flag::NONE
+                : Flag::ROBBER_STEAL;
+            finalize_outcome(base, b);
             out_states[0] = base;
-            out_probas[0] = 1.0;
+            out_probabilities[0] = 1.0;
             return 1;
         }
-        uint8_t victim = cand[0];
-        if (chance_mode == CHANCE_CATANATRON) {
-            // Flat 1/5 over resource types; a type the victim lacks is a
-            // whiff child (robber moved, nothing stolen).
-            for (uint8_t r = 0; r < NUM_RESOURCES; ++r) {
-                GameState cs = base;
-                if (base.player_resources[victim][r] > 0)
-                    do_steal_resource(cs, victim, r);
-                cs.flag = Flag::NONE;
-                finalize_child(cs, b);
-                out_states[n] = cs;
-                out_probas[n] = 1.0 / double(NUM_RESOURCES);
-                ++n;
-            }
-            return n;
+
+        uint8_t victim = candidates[0];
+        double total = double(base.player_handsize[victim]);
+        base.rng.bounded(uint32_t(total));
+        for (uint8_t resource = 0; resource < NUM_RESOURCES; ++resource) {
+            uint8_t held = base.player_resources[victim][resource];
+            if (held == 0) continue;
+            GameState child = base;
+            do_steal_resource(child, victim, resource);
+            child.flag = Flag::NONE;
+            finalize_outcome(child, b);
+            out_states[count] = child;
+            out_probabilities[count] = double(held) / total;
+            ++count;
         }
-        double total = double(base.player_handsize[victim]);  // > 0
-        for (uint8_t r = 0; r < NUM_RESOURCES; ++r) {
-            uint8_t cnt = base.player_resources[victim][r];
-            if (cnt == 0) continue;
-            GameState cs = base;
-            do_steal_resource(cs, victim, r);
-            cs.flag = Flag::NONE;
-            finalize_child(cs, b);
-            out_states[n] = cs;
-            out_probas[n] = double(cnt) / total;
-            ++n;
-        }
-        return n;
+        return count;
     }
 
-    // --- STEAL: fork the stolen resource over the chosen victim's hand. ---
-    if (action >= action::STEAL_BASE
-        && action <  action::STEAL_BASE + NUM_PLAYERS) {
-        uint8_t victim = uint8_t(action - action::STEAL_BASE);
-        bool valid = (victim != s.current_player) && (s.player_handsize[victim] > 0);
-        if (valid) {
-            bool owns = false;
-            for (uint8_t k = 0; k < topology::MAX_NODES_PER_HEX; ++k) {
-                uint8_t v = topology::hex_to_node[s.robber_hex][k];
-                uint8_t nn = s.node[v];
-                if (node_level(nn) != NODE_EMPTY && node_owner(nn) == victim) {
-                    owns = true;
-                    break;
-                }
-            }
-            valid = owns;
-        }
-        if (!valid) {  // illegal -> no-op
-            GameState cs = s;
-            finalize_child(cs, b);
-            out_states[0] = cs;
-            out_probas[0] = 1.0;
-            return 1;
-        }
-        if (chance_mode == CHANCE_CATANATRON) {
-            for (uint8_t r = 0; r < NUM_RESOURCES; ++r) {
-                GameState cs = s;
-                if (s.player_resources[victim][r] > 0)
-                    do_steal_resource(cs, victim, r);
-                cs.flag = Flag::NONE;
-                finalize_child(cs, b);
-                out_states[n] = cs;
-                out_probas[n] = 1.0 / double(NUM_RESOURCES);
-                ++n;
-            }
-            return n;
-        }
+    if (action_id >= action::STEAL_BASE
+        && action_id < action::STEAL_BASE + NUM_PLAYERS) {
+        uint8_t victim = uint8_t(action_id - action::STEAL_BASE);
         double total = double(s.player_handsize[victim]);
-        for (uint8_t r = 0; r < NUM_RESOURCES; ++r) {
-            uint8_t cnt = s.player_resources[victim][r];
-            if (cnt == 0) continue;
-            GameState cs = s;
-            do_steal_resource(cs, victim, r);
-            cs.flag = Flag::NONE;
-            finalize_child(cs, b);
-            out_states[n] = cs;
-            out_probas[n] = double(cnt) / total;
-            ++n;
+        for (uint8_t resource = 0; resource < NUM_RESOURCES; ++resource) {
+            uint8_t held = s.player_resources[victim][resource];
+            if (held == 0) continue;
+            GameState child = s;
+            child.rng.bounded(uint32_t(total));
+            do_steal_resource(child, victim, resource);
+            child.flag = Flag::NONE;
+            finalize_outcome(child, b);
+            out_states[count] = child;
+            out_probabilities[count] = double(held) / total;
+            ++count;
         }
-        return n;
+        return count;
     }
 
-    // --- Deterministic action: one child via the normal engine step. ---
-    GameState cs = s;
-    float reward = 0.0f;
-    uint8_t done = 0;
-    step_one(cs, b, action, reward, done);
-    out_states[0] = cs;
-    out_probas[0] = 1.0;
+    GameState child = s;
+    step_one(child, b, action_id);
+    out_states[0] = child;
+    out_probabilities[0] = 1.0;
     return 1;
 }
 

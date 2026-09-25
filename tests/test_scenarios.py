@@ -71,7 +71,7 @@ def _drive_collect(seed: int, max_steps: int = 200_000, observers=()):
         for name, fn in observers:
             if fn(env, mask, action, step_idx):
                 hits[name] += 1
-        _, done = env.step(action)
+        done = env.step(action)
         if done:
             return env, step_idx + 1, hits
     raise AssertionError(f"game did not terminate (seed={seed})")
@@ -290,27 +290,24 @@ def test_dev_card_cannot_be_played_same_turn_as_bought():
 
 
 # ---------------------------------------------------------------------------
-# Game ends -> reward attribution
+# Game end and winner attribution
 # ---------------------------------------------------------------------------
 
 @pytest.mark.parametrize("seed", [0, 1, 2, 3, 4, 5, 6, 7])
-def test_terminal_reward_goes_to_winner(seed):
-    """The winning action should produce reward +1 for the actor. Use BatchedEnv
-    so we can read last_winner cleanly."""
+def test_terminal_action_sets_winner(seed):
+    """The terminal action must identify its acting player as the winner."""
     rng = random.Random(seed)
     env = fastcatan.Env()
     env.reset(seed)
     mask = np.zeros(fastcatan.MASK_WORDS, dtype=np.uint64)
 
     last_cp = None
-    last_reward = None
     for _ in range(200_000):
         env.action_mask(mask)
         legals = legal_actions(mask)
         action = rng.choice(legals)
         last_cp = env.current_player
-        reward, done = env.step(action)
-        last_reward = reward
+        done = env.step(action)
         if done:
             break
 
@@ -318,7 +315,11 @@ def test_terminal_reward_goes_to_winner(seed):
     winners = [p for p, v in enumerate(vps) if v >= 10]
     assert len(winners) == 1
     assert winners[0] == last_cp, "winner should be the player who took the final action"
-    assert last_reward == pytest.approx(1.0), f"terminal reward = {last_reward}, expected +1.0"
+    assert env.done
+    assert env.winner == winners[0]
+    terminal = env.snapshot()
+    assert env.step(0), "stepping a terminal game must still report terminal"
+    assert env.snapshot() == terminal
 
 
 # ---------------------------------------------------------------------------

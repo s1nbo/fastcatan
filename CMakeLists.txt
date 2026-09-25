@@ -5,6 +5,12 @@ set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    # GCC/Clang expose a complex-arctangent builtin named `catan`; disable it
+    # so the project namespace does not trigger a declaration warning.
+    add_compile_options(-fno-builtin-catan)
+endif()
+
 if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
 endif()
@@ -31,14 +37,13 @@ else()
 endif()
 message(STATUS "fastcatan -march=${FASTCATAN_ARCH}")
 
-# Common flags. Target per PLAN.md: GCC 14.2 + Linux x86_64.
+# Optimized core flags. The Python binding keeps exceptions and RTTI enabled.
 set(FCATAN_RELEASE_FLAGS
     -O3 ${_FCATAN_ARCH_FLAG} -fno-exceptions -fno-rtti -Wall -Wextra)
 
 # Core rules library (static; the linker can fold into anything).
 add_library(fastcatan_core STATIC
     src/catan/rules.cpp
-    src/catan/obs.cpp
     src/catan/batched_env.cpp
 )
 target_include_directories(fastcatan_core PUBLIC include)
@@ -57,32 +62,9 @@ else()
     message(STATUS "OpenMP not found — building single-threaded")
 endif()
 
-# --------------------------------------------------------------------
-# Standalone C++ benchmarks — pure-C++ throughput floor, no Python.
-# Built only in the standalone CMake build (not the pip wheel):
-#   cmake -S . -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build -j
-#   build/bench_step                  # single-env: step_one + random play
-#   build/bench_batched 4096 5000     # batched (uses OpenMP if available)
-# These corroborate the nanobind-dispatch isolation in
-# DEBUG/bench/bench_throughput.py.
-# --------------------------------------------------------------------
 if(NOT SKBUILD)
-    foreach(_bench bench_step bench_batched)
-        add_executable(${_bench} DEBUG/bench/${_bench}.cpp)
-        target_link_libraries(${_bench} PRIVATE fastcatan_core)
-        target_compile_options(${_bench} PRIVATE
-            $<$<CONFIG:Release>:${FCATAN_RELEASE_FLAGS}>)
-    endforeach()
-
-    # ----------------------------------------------------------------
-    # Invariant fuzz harness — the M1 correctness gate (PLAN.md §M1,
-    # Verification). Plays random-legal games in pure C++ and checks
-    # per-step game invariants; the readable spec lives in
-    # tests/test_invariants.py. OpenMP pragmas live in this TU, so it
-    # links OpenMP directly (the bench targets inherit it only via core).
-    #   build/fuzz_invariants 10000000     # full thesis gate (~minutes)
-    #   ctest -R invariants                # fast CI smoke (100k games)
-    # ----------------------------------------------------------------
+    # Standalone invariant harness. It plays legal games in pure C++ and
+    # checks resource, piece, phase, and terminal-state invariants.
     add_executable(fuzz_invariants tests/fuzz_invariants.cpp)
     target_link_libraries(fuzz_invariants PRIVATE fastcatan_core)
     target_compile_options(fuzz_invariants PRIVATE
@@ -91,8 +73,14 @@ if(NOT SKBUILD)
         target_link_libraries(fuzz_invariants PRIVATE OpenMP::OpenMP_CXX)
     endif()
 
+    add_executable(test_outcomes tests/test_outcomes.cpp)
+    target_link_libraries(test_outcomes PRIVATE fastcatan_core)
+    target_compile_options(test_outcomes PRIVATE
+        $<$<CONFIG:Release>:${FCATAN_RELEASE_FLAGS}>)
+
     enable_testing()
     add_test(NAME invariants COMMAND fuzz_invariants 100000)
+    add_test(NAME outcomes COMMAND test_outcomes)
     set_tests_properties(invariants PROPERTIES
         TIMEOUT 900
         PASS_REGULAR_EXPRESSION "invariant failures: 0")

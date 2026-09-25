@@ -11,7 +11,7 @@ readme = "README.md"
 requires-python = ">=3.12"
 license = { text = "MIT" }
 authors = [{ name = "fastCatan" }]
-keywords = ["catan", "simulator", "reinforcement-learning", "game", "nanobind"]
+keywords = ["catan", "simulator", "board-game", "nanobind"]
 dependencies = ["numpy"]
 classifiers = [
     "Development Status :: 5 - Production/Stable",
@@ -21,12 +21,13 @@ classifiers = [
     "Programming Language :: C++",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.12",
-    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Games/Entertainment :: Board Games",
 ]
 
 [project.urls]
 Homepage = "https://github.com/s1nbo/fastcatan"
 Repository = "https://github.com/s1nbo/fastcatan"
+Changelog = "https://github.com/s1nbo/fastcatan/blob/main/CHANGELOG.md"
 
 [tool.scikit-build]
 minimum-version = "0.10"
@@ -51,7 +52,7 @@ CMAKE_BUILD_TYPE = "Release"
 build = "cp312-*"                      # abi3 -> also serves 3.13+
 build-frontend = "build"
 # Prove the wheel imports + the native API is present, inside the CI container.
-test-command = "python -c \"import fastcatan as fc; assert hasattr(fc,'Env') and hasattr(fc,'BatchedEnv'); print('fastcatan', fc.OBS_SIZE, fc.NUM_ACTIONS)\""
+test-command = "python -c \"import fastcatan as fc; e=fc.Env(); e.reset(0); assert e.legal_actions() and e.state_view(e.actor_to_act)['legal_actions']; assert hasattr(fc.Env,'enumerate_outcomes') and hasattr(fc.BatchedEnv,'load_snapshots'); print('fastcatan', fc.__version__, fc.NUM_ACTIONS)\""
 
 [tool.cibuildwheel.linux]
 # C++23 needs a modern GCC; manylinux_2_28 ships GCC 12+. (2014 image = GCC 10.)
@@ -69,3 +70,4 @@ config-settings = { "cmake.define.FASTCATAN_ARCH" = "x86-64-v2" }
 # "." resolves fastcatan native helpers used by tests.
 pythonpath = ["."]
 addopts = "--import-mode=importlib"
+testpaths = ["tests"]

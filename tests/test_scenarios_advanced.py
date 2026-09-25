@@ -169,7 +169,7 @@ def test_yop_mask_respects_bank_stock():
 # ---------------------------------------------------------------------------
 
 def test_trade_to_bank_blocked_when_bank_empty():
-    """When bank[get] == 0, no TRADE_BASE+give*4+get action with that `get` is legal."""
+    """When bank[get] is empty, no give*5+get trade is legal."""
     a = fastcatan.action
 
     saw_empty = 0
@@ -184,7 +184,7 @@ def test_trade_to_bank_blocked_when_bank_empty():
             for get in range(5):
                 if env.bank(get) == 0:
                     saw_empty += 1
-                    # TRADE_BASE = 210, layout: give*5 + get for 25 entries? confirm: 235-210=25
+                    # TRADE_BASE = 210, layout: give*5 + get for 25 entries.
                     for give in range(5):
                         if give == get:
                             continue

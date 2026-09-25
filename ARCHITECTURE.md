@@ -1,50 +1,63 @@
 # FastCatan architecture
 
-FastCatan 2.x is a simulator library. It owns Catan state, legal transitions,
-observations, deterministic randomness, batching, Python bindings, and simulator
-conformance tests. It does not own agents, training loops, planning algorithms,
-or tournament evaluation; those live in the separate `catan-rl` repository.
+FastCatan contains a rules engine and two simulator interfaces: one game and a
+contiguous batch of independent games. It has no player implementations,
+decision-making logic, outcome scoring, or numeric feature encoder.
 
-## Core ownership
+## Source ownership
 
-| path | responsibility |
+| Path | Responsibility |
 |---|---|
-| `include/state.hpp` | `GameState`, `BoardLayout`, phases, flags, acting-seat authority |
-| `include/rules.hpp` | action IDs, reset/step contract, weighted chance expansion |
-| `include/obs.hpp` | versioned POV and privileged diagnostic observation schemas |
-| `include/batched_env.hpp` | vectorized simulator storage and branching primitives |
-| `src/catan/rules.cpp` | legal masks, rule transitions, awards, trades, chance outcomes |
-| `src/catan/obs.cpp` | information-set-safe POV encoding and full diagnostic encoding |
-| `src/catan/batched_env.cpp` | batched reset, step, snapshot, observation, and signatures |
-| `bindings/pycatan/bindings.cpp` | allocation-free NumPy-facing Python API |
+| `include/state.hpp` | Game state, board layout, phases, flags, and constants |
+| `include/topology.hpp` | Static board adjacency tables |
+| `include/rng.hpp` | Per-game deterministic random-number generator |
+| `include/rules.hpp` | Action IDs, sampled transitions, and exact physical outcomes |
+| `include/mask.hpp` | Legal-action bitset contract |
+| `include/batched_env.hpp` | Contiguous batched simulator storage |
+| `src/catan/rules.cpp` | Setup, legality, transitions, trades, awards, and chance events |
+| `src/catan/batched_env.cpp` | Batched reset, stepping, snapshots, RNG control, and masks |
+| `bindings/pycatan/bindings.cpp` | Validated Python and NumPy boundary |
 
-The single acting-seat authority is `actor_to_act(GameState)`. `current_player`
-is the turn owner and is not necessarily the decision owner during cross-seat
-forced phases such as discarding after a seven.
+`GameState` owns all mutable state, including its random-number generator and
+cached legal-action mask. `BoardLayout` is randomized during reset and remains
+fixed for the life of the game. Both are trivially copyable so snapshots can
+round-trip them exactly within one package version.
 
-## Public boundary
+## Transition contract
 
-`Env` provides single-game reset, legal mask, step, observation, snapshot, RNG,
-and read-only state inspection. `BatchedEnv` provides the same simulator
-operations over contiguous state arrays, including raw non-resetting steps for
-branching consumers.
+`reset_one` initializes a board, pieces, bank, development deck, turn owner,
+random-number state, and legal-action mask. `step_one` applies one action and
+returns whether the game is terminal. An out-of-range or currently illegal
+action is a strict no-op. The legal-action mask is rebuilt after every accepted
+transition.
 
-`write_obs` is the deployable partial-information view. `write_obs_full` is an
-explicitly privileged diagnostic view and must not be fed to decentralized
-policies. Observation meaning is guarded by `OBS_SEMANTICS_VERSION` even when
-tensor width is unchanged.
+`enumerate_action_outcomes` is the non-sampling form of the same transition
+model. It enumerates dice, development-card, and robber-steal results from the
+physical state. It does not choose actions or assign values to outcomes.
 
-Weighted `expand_action` is a transition-model primitive: it enumerates dice,
-development-card, and robber outcomes without choosing actions. Search policy
-and value logic does not belong in this repository.
+`current_player` owns the turn. `actor_to_act(GameState)` owns the next decision;
+these differ while another seat discards after a seven.
 
-## Build and verification
+Games normally end when a player reaches ten victory points. `MAX_TURNS` is a
+backstop for non-progressing games, and `MAX_TRADE_COMPOSE_PER_TURN` prevents a
+single turn from cycling forever while composing and cancelling trades.
 
-The C++ core is compiled into a nanobind stable-ABI module through
-scikit-build-core. OpenMP is optional and affects throughput only. The Python
-package has only NumPy as a runtime dependency.
+## Python boundary
 
-Simulator tests cover deterministic replay, mask integrity, illegal-action
-no-ops, official-rule scenarios, information noninterference, snapshots, and
-batched/single-environment parity. Cross-engine and agent evaluation suites are
-owned by `catan-rl`.
+`Env` exposes semantic board and player fields, legal actions, stepping, exact
+outcomes, and validated snapshots. `state_view` filters private state by player
+without converting it into a numeric feature representation. The API rejects
+use before reset and checks every seat, resource, card, node, edge, hex, and port
+index before entering the C++ arrays.
+
+`BatchedEnv` owns aligned arrays of states and layouts. Its hot loops release the
+Python lock and use OpenMP when available. Normal steps preserve terminal states.
+Automatic terminal reset is an explicit continuous-simulation operation. Bulk
+snapshot, restore, and RNG reseeding support replay and independent batch slots.
+
+## Verification
+
+Python tests cover deterministic replay, illegal-action no-ops, action-mask
+integrity, official-rule scenarios, trade flow, input validation, snapshots,
+and batched operation. The standalone `fuzz_invariants` executable runs the
+same conservation and range invariants over a much larger number of games.

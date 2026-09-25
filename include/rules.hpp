@@ -7,42 +7,25 @@ namespace catan {
     // Initialize one episode. Randomizes BoardLayout
     void reset_one(GameState& s, BoardLayout& b, uint64_t seed) noexcept;
 
-    // Advance one env by one action. Mask-illegal actions are strict no-ops;
-    // production callers should still pass only legal actions.
-    void step_one(GameState& s, const BoardLayout& b,
-                  uint32_t action, float& reward, uint8_t& done) noexcept;
+    // Advance one game by one action and return whether it is terminal.
+    // Mask-illegal actions are strict no-ops.
+    bool step_one(GameState& s, const BoardLayout& b,
+                  uint32_t action) noexcept;
 
-    // Max (state, probability) outcomes emitted for one action: 11 dice sums.
-    inline constexpr int MAX_EXPAND_OUTCOMES = 11;
+    // Maximum number of physical outcomes for one action: the eleven 2d6
+    // totals. Deterministic actions produce one outcome.
+    inline constexpr uint32_t MAX_ACTION_OUTCOMES = 11;
 
-    // Chance models for expand_action's stochastic forks.
-    //   CHANCE_TRUE       — fork the TRUE distributions: victim's actual hand
-    //                       for steals, the real remaining deck for BUY_DEV.
-    //                       (More correct than Catanatron; the default.)
-    //   CHANCE_CATANATRON — compatibility mode for Catanatron differential
-    //                       testing; emulates its tree_search_utils blur:
-    //                       steals fork flat 1/5 over the five resource types
-    //                       (a type the victim lacks yields an UNCHANGED
-    //                       "whiff" child, mirroring their swallowed
-    //                       exception); BUY_DEV forks the info-set deck
-    //                       (remaining deck + all enemies' hidden devs), with
-    //                       types absent from the real deck also collapsing to
-    //                       a whiff child. Use this when the search must
-    //                       reference implementation.
-    inline constexpr int CHANCE_TRUE       = 0;
-    inline constexpr int CHANCE_CATANATRON = 1;
-
-    // Enumerate weighted simulator outcomes for an action. Writes child states
-    // of applying `action` to (s,b) into out_states / out_probas
-    // (caller arrays sized >= MAX_EXPAND_OUTCOMES). Deterministic actions yield
-    // one outcome (proba 1); ROLL_DICE, BUY_DEV and robber-steal fan out over
-    // their chance outcomes (per `chance_mode` above). Each child gets a
-    // freshly recomputed action mask and phase, so a search can recurse on it
-    // directly. `action` must be legal in `s`. Returns the number of outcomes
-    // written. Probabilities sum to 1.
-    int expand_action(const GameState& s, const BoardLayout& b, uint32_t action,
-                      GameState* out_states, double* out_probas,
-                      int chance_mode = CHANCE_TRUE) noexcept;
+    // Enumerate the exact simulator transitions for one action without
+    // sampling chance. Dice rolls, development-card draws, and robber steals
+    // fan out according to the physical game state. Illegal actions produce
+    // one unchanged outcome with probability 1. The caller provides arrays of
+    // at least MAX_ACTION_OUTCOMES elements. Each child consumes the same RNG
+    // draw as a sampled transition, while the source remains unchanged.
+    // Returns the number written.
+    uint32_t enumerate_action_outcomes(
+        const GameState& s, const BoardLayout& b, uint32_t action,
+        GameState* out_states, double* out_probabilities) noexcept;
 
     // Action ID layout
     namespace action {
@@ -54,7 +37,7 @@ namespace catan {
         inline constexpr uint32_t DISCARD_BASE     = 182;  // [182, 187) discard 1 of resource r
         inline constexpr uint32_t MOVE_ROBBER_BASE = 187;  // [187, 206) move robber to hex h
         inline constexpr uint32_t STEAL_BASE       = 206;  // [206, 210) steal from player p
-        inline constexpr uint32_t TRADE_BASE       = 210;  // [210, 235) bank/port trade: give*4 + get (e.g. give wood, get brick; give wheat, get brick...)
+        inline constexpr uint32_t TRADE_BASE       = 210;  // [210, 235) bank/port trade: give*5 + get
         inline constexpr uint32_t BUY_DEV          = 235;
         inline constexpr uint32_t PLAY_KNIGHT          = 236;
         inline constexpr uint32_t PLAY_ROAD_BUILDING   = 237;

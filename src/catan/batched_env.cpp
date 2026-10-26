@@ -1,6 +1,6 @@
-#include "batched_env.hpp"
-#include "rules.hpp"
-#include "mask.hpp"
+#include "../../include/batched_env.hpp"
+#include "../../include/rules.hpp"
+#include "../../include/mask.hpp"
 
 #include <algorithm>
 #include <bit>

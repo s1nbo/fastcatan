@@ -23,17 +23,7 @@ namespace catan {
     // non-termination.
     inline constexpr uint16_t MAX_TURNS    = 2000;
 
-    // Per-turn player-to-player trade-compose budget -- canonical home for the
-    // trade-stall fix. The dominant stall is a
-    // within-turn churn: ADD_WANT is legal while trade_want[r] < 19 and CANCEL
-    // while the scratch is non-empty, so ADD_WANT -> CANCEL -> ADD_WANT loops
-    // forever without opening a trade or ending the turn -- turn_count (bumped
-    // only on END_TURN) freezes, so MAX_TURNS never fires. After this many compose
-    // actions (TRADE_ADD_GIVE..TRADE_OPEN) in one turn, compute_mask masks the
-    // compose block off (CANCEL/build/bank-trade/END_TURN stay legal, so the mask
-    // is never emptied), forcing the turn to progress so turn_count advances and
-    // MAX_TURNS can fire. Applied uniformly to every seat by the simulator.
-    // A real offer is a few ADD_* + OPEN, so only churn ever reaches this.
+    // Per-turn player-to-player trade-compose budget
     inline constexpr uint8_t MAX_TRADE_COMPOSE_PER_TURN = 50;
 
     // node[] encoding: bits 0-1 = level, bits 2-3 = owner.

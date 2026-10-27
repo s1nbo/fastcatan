@@ -67,7 +67,7 @@ config-settings = { "cmake.define.FASTCATAN_ARCH" = "x86-64-v2" }
 # arch + deployment target come from the CI matrix per runner (x86_64 vs arm64).
 
 [tool.pytest.ini_options]
-# "." resolves fastcatan native helpers used by tests.
+# "." makes the shared helpers importable as tests.conftest.
 pythonpath = ["."]
 addopts = "--import-mode=importlib"
 testpaths = ["tests"]

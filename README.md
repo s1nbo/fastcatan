@@ -124,20 +124,6 @@ dictionary schema is versioned by `STATE_VIEW_VERSION`.
 Snapshots are an internal binary format. Only load snapshots created by the
 same package version; malformed snapshots are rejected.
 
-## Upgrading from 1.x
-
-Version 2.0 is a simulator-only release with a smaller public API:
-
-- `Env.step(action)` returns only the terminal-state boolean.
-- `BatchedEnv.step` preserves terminal states. Use `step_autoreset` when a
-  completed slot should immediately start a new game.
-- Tensor encoders, configurable scoring, and search diagnostics are no longer
-  part of this package.
-- `state_view`, `enumerate_outcomes`, and bulk snapshot methods provide neutral
-  simulator data for downstream projects.
-
-See [CHANGELOG.md](CHANGELOG.md) for the complete release summary.
-
 ## Development
 
 ```bash

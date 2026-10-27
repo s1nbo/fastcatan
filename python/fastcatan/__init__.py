@@ -1,5 +1,7 @@
 """High-throughput Catan simulator (C++ core via nanobind)."""
 
+from importlib.metadata import version as _version
+
 from ._fastcatan import (  # noqa: F401
     BatchedEnv,
     Env,
@@ -38,4 +40,4 @@ __all__ = [
     "action",
 ]
 
-__version__ = "2.0.0"
+__version__ = _version("fastcatan")

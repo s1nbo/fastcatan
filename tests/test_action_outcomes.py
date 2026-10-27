@@ -5,6 +5,7 @@ import math
 import random
 
 import fastcatan
+from tests.conftest import buy_dev_state
 
 
 def _pre_roll_state(seed: int = 0) -> fastcatan.Env:
@@ -14,18 +15,6 @@ def _pre_roll_state(seed: int = 0) -> fastcatan.Env:
         env.step(env.legal_actions()[0])
     assert env.dice_roll == 0
     return env
-
-
-def _buy_dev_state(seed: int = 123) -> fastcatan.Env:
-    env = fastcatan.Env()
-    env.reset(seed)
-    rng = random.Random(seed)
-    for _ in range(5_000):
-        legal = env.legal_actions()
-        if fastcatan.action.BUY_DEV in legal:
-            return env
-        assert not env.step(rng.choice(legal))
-    raise AssertionError("no development-card purchase became legal")
 
 
 def test_illegal_and_deterministic_actions_have_one_exact_outcome() -> None:
@@ -73,7 +62,7 @@ def test_dice_enumeration_has_exact_2d6_distribution() -> None:
 
 
 def test_development_draw_distribution_uses_physical_deck() -> None:
-    env = _buy_dev_state()
+    env = buy_dev_state()
     actor = env.actor_to_act
     deck_before = [env.dev_deck(card) for card in range(5)]
     total = sum(deck_before)

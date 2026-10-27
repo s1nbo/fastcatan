@@ -191,8 +191,8 @@ uint64_t batched_env_run_random_games(BatchedEnv& env,
 }
 
 void batched_env_write_masks(const BatchedEnv& env, uint64_t* out) noexcept {
-    // Read from the incrementally-maintained s.action_mask field. step_one
-    // and reset_one keep it current. ~free vs the previous full recompute.
+    // Copy the incrementally maintained s.action_mask field; step_one and
+    // reset_one keep it current.
 #ifdef FCATAN_HAVE_OPENMP
     #pragma omp parallel for schedule(static)
 #endif

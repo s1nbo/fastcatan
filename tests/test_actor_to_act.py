@@ -4,20 +4,7 @@ from __future__ import annotations
 
 import random
 
-import numpy as np
-
 import fastcatan
-
-
-def _legal_actions(mask: np.ndarray) -> list[int]:
-    legal: list[int] = []
-    for word_idx, word in enumerate(mask):
-        bits = int(word)
-        while bits:
-            bit = (bits & -bits).bit_length() - 1
-            legal.append(word_idx * 64 + bit)
-            bits &= bits - 1
-    return legal
 
 
 def _first_cross_seat_discard() -> fastcatan.Env:
@@ -25,13 +12,11 @@ def _first_cross_seat_discard() -> fastcatan.Env:
     rng = random.Random(0)
     env = fastcatan.Env()
     env.reset(0)
-    mask = np.zeros(fastcatan.MASK_WORDS, dtype=np.uint64)
 
     for _ in range(2_000):
         if env.flag == 1 and env.discarding_player != env.current_player:
             return env
-        env.action_mask(mask)
-        legal = _legal_actions(mask)
+        legal = env.legal_actions()
         assert legal
         done = env.step(rng.choice(legal))
         assert not done, "seed-0 fixture ended before reaching discard state"

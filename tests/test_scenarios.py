@@ -13,7 +13,7 @@ import numpy as np
 import pytest
 
 import fastcatan
-from tests.conftest import legal_actions
+from tests.conftest import find_state, legal_actions
 
 
 # Flag enum mirror (from include/state.hpp)
@@ -21,10 +21,6 @@ FLAG_NONE           = 0
 FLAG_DISCARD        = 1
 FLAG_MOVE_ROBBER    = 2
 FLAG_ROBBER_STEAL   = 3
-FLAG_YOP            = 4
-FLAG_MONOPOLY       = 5
-FLAG_PLACE_ROAD     = 6
-FLAG_TRADE_PENDING  = 7
 
 
 def _action_range(action_id: int) -> str:
@@ -180,67 +176,87 @@ def test_steal_phase_options_valid():
 
 
 # ---------------------------------------------------------------------------
-# Year of plenty
+# Year of plenty and monopoly resolve in the PLAY action itself; neither
+# card opens a follow-up flag.
 # ---------------------------------------------------------------------------
 
-def test_year_of_plenty_flag_options():
-    """When flag == YEAR_OF_PLENTY, options are PLAY_YEAR_OF_PLENTY base + 25 combos."""
-    a = fastcatan.action
-
-    fires = 0
-    for seed in range(60):
-        rng = random.Random(seed)
-        env = fastcatan.Env()
-        env.reset(seed)
-        mask = np.zeros(fastcatan.MASK_WORDS, dtype=np.uint64)
-        for _ in range(200_000):
-            env.action_mask(mask)
-            legals = legal_actions(mask)
-            if env.flag == FLAG_YOP:
-                fires += 1
-                for aid in legals:
-                    assert a.PLAY_YEAR_OF_PLENTY <= aid < a.PLAY_YEAR_OF_PLENTY + 25, (
-                        f"non-YOP action {aid} legal during YEAR_OF_PLENTY"
-                    )
-            env.step(rng.choice(legals))
-            if env.phase == 3:
-                break
-        if fires >= 1:
-            return
-    # YOP is rare in random play. Tolerate zero across seeds; no fail.
+YOP_ACTIONS = range(fastcatan.action.PLAY_YEAR_OF_PLENTY,
+                    fastcatan.action.PLAY_YEAR_OF_PLENTY + 25)
+MONOPOLY_ACTIONS = range(fastcatan.action.PLAY_MONOPOLY,
+                         fastcatan.action.PLAY_MONOPOLY + 5)
+DEV_PLAY_ACTIONS = range(fastcatan.action.PLAY_KNIGHT,
+                         fastcatan.action.TRADE_ADD_GIVE_BASE)
+DEV_YOP = 3
+DEV_MONOPOLY = 4
 
 
-# ---------------------------------------------------------------------------
-# Monopoly
-# ---------------------------------------------------------------------------
+def _resources(env, seat: int) -> list[int]:
+    return [env.player_resource(seat, r) for r in range(5)]
 
-def test_monopoly_phase_resource_choice():
-    """When flag == MONOPOLY, exactly 5 resource choices in the mask."""
-    a = fastcatan.action
 
-    for seed in range(80):
-        rng = random.Random(seed)
-        env = fastcatan.Env()
-        env.reset(seed)
-        mask = np.zeros(fastcatan.MASK_WORDS, dtype=np.uint64)
-        for _ in range(200_000):
-            env.action_mask(mask)
-            legals = legal_actions(mask)
-            if env.flag == FLAG_MONOPOLY:
-                for aid in legals:
-                    assert a.PLAY_MONOPOLY <= aid < a.PLAY_MONOPOLY + 5, (
-                        f"non-monopoly action {aid} legal during MONOPOLY"
-                    )
-                # Resource conservation must hold across monopoly resolution
-                pre_totals = [env.bank(r) + sum(env.player_resource(p, r) for p in range(4)) for r in range(5)]
-                env.step(rng.choice(legals))
-                post_totals = [env.bank(r) + sum(env.player_resource(p, r) for p in range(4)) for r in range(5)]
-                assert pre_totals == post_totals, "monopoly broke resource conservation"
-                return
-            env.step(rng.choice(legals))
-            if env.phase == 3:
-                break
-    pytest.skip("monopoly flag never fired in random play across 80 seeds")
+def _bank(env) -> list[int]:
+    return [env.bank(r) for r in range(5)]
+
+
+def _assert_dev_card_spent(env, seat: int, card: int, cards_before: int):
+    assert env.player_dev(seat, card) == cards_before - 1
+    assert env.flag == FLAG_NONE
+    assert env.actor_to_act == seat
+    assert env.dev_card_played
+    assert not any(aid in DEV_PLAY_ACTIONS for aid in env.legal_actions()), (
+        "a second development card became playable in the same turn"
+    )
+
+
+def test_year_of_plenty_resolves_in_one_action():
+    """Every legal YOP pair moves exactly that pair from the bank to the player."""
+    env = find_state(lambda env, legal: any(aid in YOP_ACTIONS for aid in legal))
+    seat = env.actor_to_act
+    plays = [aid for aid in env.legal_actions() if aid in YOP_ACTIONS]
+    start = env.snapshot()
+    hand, bank = _resources(env, seat), _bank(env)
+    cards = env.player_dev(seat, DEV_YOP)
+
+    for play in plays:
+        env.load_snapshot(start)
+        r1, r2 = divmod(play - fastcatan.action.PLAY_YEAR_OF_PLENTY, 5)
+        gained = [0] * 5
+        gained[r1] += 1
+        gained[r2] += 1
+
+        assert not env.step(play)
+        assert _resources(env, seat) == [h + g for h, g in zip(hand, gained)]
+        assert _bank(env) == [b - g for b, g in zip(bank, gained)]
+        _assert_dev_card_spent(env, seat, DEV_YOP, cards)
+
+
+def test_monopoly_resolves_in_one_action():
+    """Each monopoly resource takes every opponent's cards of that resource."""
+    def playable_with_targets(env, legal):
+        seat = env.actor_to_act
+        return (any(aid in MONOPOLY_ACTIONS for aid in legal)
+                and any(env.player_handsize(p) for p in range(4) if p != seat))
+
+    env = find_state(playable_with_targets)
+    seat = env.actor_to_act
+    plays = [aid for aid in env.legal_actions() if aid in MONOPOLY_ACTIONS]
+    assert plays == list(MONOPOLY_ACTIONS), "all five monopoly resources must be legal"
+    start = env.snapshot()
+    hands = [_resources(env, p) for p in range(4)]
+    bank = _bank(env)
+    cards = env.player_dev(seat, DEV_MONOPOLY)
+
+    for resource, play in enumerate(plays):
+        env.load_snapshot(start)
+        taken = sum(hands[p][resource] for p in range(4) if p != seat)
+
+        assert not env.step(play)
+        for p in range(4):
+            expected = list(hands[p])
+            expected[resource] = hands[p][resource] + taken if p == seat else 0
+            assert _resources(env, p) == expected, f"seat {p} after monopoly on r{resource}"
+        assert _bank(env) == bank
+        _assert_dev_card_spent(env, seat, DEV_MONOPOLY, cards)
 
 
 # ---------------------------------------------------------------------------
@@ -264,7 +280,6 @@ def test_dev_card_cannot_be_played_same_turn_as_bought():
         env = fastcatan.Env()
         env.reset(seed)
         mask = np.zeros(fastcatan.MASK_WORDS, dtype=np.uint64)
-        pending = {p: None for p in range(4)}  # turn-of-buy per player
         for _ in range(200_000):
             env.action_mask(mask)
             legals = legal_actions(mask)
@@ -335,8 +350,6 @@ def test_robber_moves_only_on_move_robber_action():
     its robber slot, but since we can't address that slot, we use indirect
     check: when MOVE_ROBBER fires, the flag transitions away from MOVE_ROBBER.
     """
-    a = fastcatan.action
-
     for seed in range(10):
         rng = random.Random(seed)
         env = fastcatan.Env()

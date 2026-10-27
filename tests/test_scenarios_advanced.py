@@ -7,13 +7,12 @@ import numpy as np
 import pytest
 
 import fastcatan
-from tests.conftest import legal_actions
+from tests.conftest import find_state, legal_actions
 
 
-FLAG_NONE = 0
 FLAG_TRADE_PENDING = 7
 
-NO_PLAYER = 0xFF
+NO_PLAYER = fastcatan.NO_PLAYER
 LONGEST_ROAD_THRESHOLD = 5
 LARGEST_ARMY_THRESHOLD = 3
 
@@ -128,40 +127,24 @@ def test_largest_army_threshold_and_strict_exceed():
 # ---------------------------------------------------------------------------
 
 def test_yop_mask_respects_bank_stock():
-    """When YOP flag active, every legal (r1, r2) combo satisfies bank constraints."""
+    """A YOP pair is legal exactly when the bank can pay it."""
     a = fastcatan.action
+    yop = range(a.PLAY_YEAR_OF_PLENTY, a.PLAY_YEAR_OF_PLENTY + 25)
 
-    checked = 0
-    for seed in range(60):
-        rng = random.Random(seed)
-        env = fastcatan.Env()
-        env.reset(seed)
-        mask = np.zeros(fastcatan.MASK_WORDS, dtype=np.uint64)
-        for _ in range(200_000):
-            env.action_mask(mask)
-            legals = legal_actions(mask)
-            if env.flag == 4:  # YEAR_OF_PLENTY
-                bank = [env.bank(r) for r in range(5)]
-                for aid in legals:
-                    assert a.PLAY_YEAR_OF_PLENTY <= aid < a.PLAY_YEAR_OF_PLENTY + 25
-                    rel = aid - a.PLAY_YEAR_OF_PLENTY
-                    r1, r2 = rel // 5, rel % 5
-                    if r1 == r2:
-                        assert bank[r1] >= 2, (
-                            f"YOP mask offers (r{r1},r{r2}) but bank[{r1}]={bank[r1]}"
-                        )
-                    else:
-                        assert bank[r1] >= 1 and bank[r2] >= 1, (
-                            f"YOP mask offers (r{r1},r{r2}) but bank={bank}"
-                        )
-                checked += 1
-                if checked >= 3:
-                    return
-            env.step(rng.choice(legals))
-            if env.phase == 3:
-                break
-    if checked == 0:
-        pytest.skip("YOP never fired across 60 seeds")
+    # Hold the card until the bank runs short, so some pairs must be illegal.
+    env = find_state(
+        lambda env, legal: (any(aid in yop for aid in legal)
+                            and min(env.bank(r) for r in range(5)) < 2),
+        avoid=frozenset(yop),
+    )
+    legal = set(env.legal_actions())
+    bank = [env.bank(r) for r in range(5)]
+    for r1 in range(5):
+        for r2 in range(5):
+            payable = bank[r1] >= 2 if r1 == r2 else bank[r1] >= 1 and bank[r2] >= 1
+            assert (a.PLAY_YEAR_OF_PLENTY + r1 * 5 + r2 in legal) == payable, (
+                f"YOP (r{r1}, r{r2}) legality disagrees with bank={bank}"
+            )
 
 
 # ---------------------------------------------------------------------------

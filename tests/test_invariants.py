@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import pytest
 
-import fastcatan
 from tests.conftest import play_random_game
 
 

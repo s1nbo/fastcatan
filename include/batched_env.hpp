@@ -6,7 +6,6 @@ namespace catan {
 
     // BatchedEnv — N independent (GameState, BoardLayout) pairs in contiguous
     // buffers. Loops use OpenMP when available.
-    //
     struct BatchedEnv {
         uint32_t n;                  // number of envs
         GameState*  states;          // aligned array, length n

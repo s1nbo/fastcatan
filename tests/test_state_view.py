@@ -1,23 +1,10 @@
 """Player-visible semantic state never exposes an opponent's private cards."""
 from __future__ import annotations
 
-import random
-
 import pytest
 
 import fastcatan
-
-
-def _buy_dev_state(seed: int = 123) -> fastcatan.Env:
-    env = fastcatan.Env()
-    env.reset(seed)
-    rng = random.Random(seed)
-    for _ in range(5_000):
-        legal = env.legal_actions()
-        if fastcatan.action.BUY_DEV in legal:
-            return env
-        assert not env.step(rng.choice(legal))
-    raise AssertionError("no development-card purchase became legal")
+from tests.conftest import buy_dev_state
 
 
 def test_state_view_has_only_requested_players_private_state() -> None:
@@ -52,7 +39,7 @@ def test_state_view_has_only_requested_players_private_state() -> None:
 
 
 def test_hidden_development_draw_identity_does_not_change_opponent_view() -> None:
-    env = _buy_dev_state()
+    env = buy_dev_state()
     buyer = env.actor_to_act
     observer = (buyer + 1) % fastcatan.NUM_PLAYERS
     outcomes = env.enumerate_outcomes(fastcatan.action.BUY_DEV)
@@ -71,7 +58,7 @@ def test_hidden_development_draw_identity_does_not_change_opponent_view() -> Non
 
 
 def test_unopened_trade_draft_is_visible_only_to_owner() -> None:
-    env = _buy_dev_state(17)
+    env = buy_dev_state(17)
     owner = env.actor_to_act
     observer = (owner + 1) % fastcatan.NUM_PLAYERS
 

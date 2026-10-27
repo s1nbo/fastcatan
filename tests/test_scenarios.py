@@ -310,28 +310,28 @@ def test_dev_card_cannot_be_played_same_turn_as_bought():
 
 @pytest.mark.parametrize("seed", [0, 1, 2, 3, 4, 5, 6, 7])
 def test_terminal_action_sets_winner(seed):
-    """The terminal action must identify its acting player as the winner."""
+    """Only the turn owner wins: either the player who took the final action,
+    or the next player whose turn began with >= 10 VP."""
     rng = random.Random(seed)
     env = fastcatan.Env()
     env.reset(seed)
     mask = np.zeros(fastcatan.MASK_WORDS, dtype=np.uint64)
 
-    last_cp = None
+    last_cp = last_action = None
     for _ in range(200_000):
         env.action_mask(mask)
         legals = legal_actions(mask)
         action = rng.choice(legals)
-        last_cp = env.current_player
+        last_cp, last_action = env.current_player, action
         done = env.step(action)
         if done:
             break
 
-    vps = [env.player_vp(p) for p in range(4)]
-    winners = [p for p, v in enumerate(vps) if v >= 10]
-    assert len(winners) == 1
-    assert winners[0] == last_cp, "winner should be the player who took the final action"
     assert env.done
-    assert env.winner == winners[0]
+    assert env.winner == env.current_player
+    assert env.player_vp(env.winner) >= 10
+    if last_action != fastcatan.action.END_TURN:
+        assert env.winner == last_cp, "an own-turn win belongs to the player who acted"
     terminal = env.snapshot()
     assert env.step(0), "stepping a terminal game must still report terminal"
     assert env.snapshot() == terminal

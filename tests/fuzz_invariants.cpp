@@ -8,6 +8,10 @@
 //     fields count *remaining* pieces, so this also catches uint8 underflow
 //   * bank + sum(player resources) conserved at 19 per resource type
 //   * a non-empty legal-action mask at every step
+//   * the turn owner never sits on WIN_VP in a live game (own-turn wins only)
+//   * current_player stays the proposer while a player trade is open
+//   * Longest Road: the holder has >= 5 and no strictly longer rival; with no
+//     holder, nobody is the unique longest at >= 5
 //   * terminal state has a winner or reached the turn limit
 //
 // Invariant violations exit nonzero. A game may exceed the configured step cap
@@ -43,6 +47,7 @@ constexpr int     STARTING_BANK = 19;
 constexpr uint8_t SETTLE_STOCK  = 5;
 constexpr uint8_t CITY_STOCK    = 4;
 constexpr uint8_t ROAD_STOCK    = 15;
+constexpr uint8_t LONGEST_ROAD_MIN = 5;
 
 // Uniformly pick one legal action from the maintained mask; sets `empty` if no
 // bit is set (an invariant violation in itself — roll/end_turn must always keep
@@ -84,6 +89,22 @@ inline const char* check_invariants(const GameState& s) noexcept {
         int total = s.bank[r];
         for (int p = 0; p < NUM_PLAYERS; ++p) total += s.player_resources[p][r];
         if (total != STARTING_BANK)                      return "resource not conserved (!= 19)";
+    }
+
+    if (s.phase == Phase::MAIN && s.player_vp[s.current_player] >= WIN_VP)
+        return "turn owner has WIN_VP but the game did not end";
+    if (s.flag == Flag::TRADE_PENDING && s.current_player != s.trade_proposer)
+        return "current_player is not the trade proposer during a trade";
+
+    uint8_t longest = 0, at_longest = 0;
+    for (int p = 0; p < NUM_PLAYERS; ++p) longest = std::max(longest, s.player_road_length[p]);
+    for (int p = 0; p < NUM_PLAYERS; ++p) at_longest += s.player_road_length[p] == longest;
+    const uint8_t holder = s.longest_road_owner;
+    if (holder != NO_PLAYER) {
+        if (s.player_road_length[holder] < LONGEST_ROAD_MIN) return "Longest Road holder below 5";
+        if (s.player_road_length[holder] < longest)          return "Longest Road holder strictly beaten";
+    } else if (longest >= LONGEST_ROAD_MIN && at_longest == 1) {
+        return "unique longest road >= 5 left unclaimed";
     }
     return nullptr;
 }
@@ -158,9 +179,7 @@ int main(int argc, char** argv) {
                 capped.fetch_add(1, std::memory_order_relaxed);
                 continue;
             }
-            uint8_t mx = 0;
-            for (int p = 0; p < NUM_PLAYERS; ++p) mx = std::max(mx, s.player_vp[p]);
-            if (mx < WIN_VP && s.turn_count < MAX_TURNS) {
+            if (winner_of(s) == NO_PLAYER && s.turn_count < MAX_TURNS) {
                 record_violation(gseed, steps,
                                  "terminated without a winner before turn limit");
                 continue;

@@ -28,7 +28,6 @@ def test_env_construct_and_reset():
 def test_random_game_terminates(seed):
     env, steps = play_random_game(seed)
     assert env.phase == 3, "expected ENDED phase after termination"
-    vps = [env.player_vp(p) for p in range(4)]
-    winners = [p for p, v in enumerate(vps) if v >= 10]
-    assert len(winners) == 1, f"expected exactly one winner, got vps={vps}"
+    assert env.winner == env.current_player, "only the turn owner can win"
+    assert env.player_vp(env.winner) >= 10
     assert steps > 0

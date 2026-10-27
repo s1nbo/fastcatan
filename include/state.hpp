@@ -108,7 +108,7 @@ namespace catan {
         uint8_t longest_road_owner; // player id, or sentinel if none
         uint8_t largest_army_owner; // player id, or sentinel if none
         bool    dev_card_played;    // current player already played a dev card this turn
-        uint8_t current_player;     // whose turn it is; preserved across sub-phases
+        uint8_t current_player;     // whose turn it is; preserved across sub-phases and trades
         uint8_t discarding_player;  // active discarder during DISCARD_RESOURCES sub-phase
         uint8_t free_roads_remaining; // 0..2 during PLACE_ROAD sub-phase from Road Building
 
@@ -135,16 +135,6 @@ namespace catan {
         // Updated after every step_one. Consumers read this directly instead
         // of paying for a full recompute.
         uint64_t action_mask[5];
-
-        // --- Longest-road component membership (one 54-bit set per player) ---
-        // Bit n set => node n is a valid longest-road path endpoint for the
-        // player. A node joins the player's set when the player builds an
-        // incident road (or settlement) while the node is NOT enemy-occupied,
-        // and is never removed thereafter. This preserves the history needed
-        // to make a road segment terminating at an opponent building
-        // count toward longest road iff the road was built before the opponent
-        // settled there.
-        uint64_t road_node_member[4];
     };
 
     // Just for Checking.
@@ -161,14 +151,30 @@ namespace catan {
     inline constexpr std::size_t SNAPSHOT_BYTES =
         sizeof(GameState) + sizeof(BoardLayout);
 
-    // Seat that owns the next decision. During a roll-7 discard sequence the
-    // turn owner remains in current_player while discarding_player advances
-    // through the affected seats; callers must not assume that current_player
-    // always owns the action.
+    // Seat that owns the next decision. current_player is always the turn
+    // owner, but it does not always act: during a roll-7 discard sequence
+    // discarding_player advances through the affected seats, and during an
+    // open player trade each opponent answers in clockwise order from the
+    // proposer before the proposer confirms or cancels.
     inline constexpr uint8_t actor_to_act(const GameState& s) noexcept {
-        return s.flag == Flag::DISCARD_RESOURCES
-            ? s.discarding_player
-            : s.current_player;
+        if (s.flag == Flag::DISCARD_RESOURCES) return s.discarding_player;
+        if (s.flag == Flag::TRADE_PENDING) {
+            for (uint8_t i = 1; i < NUM_PLAYERS; ++i) {
+                uint8_t seat = uint8_t((s.trade_proposer + i) & 0x03);
+                if (((s.trade_response >> (2 * seat)) & 0x03) == 0)  // PENDING
+                    return seat;
+            }
+        }
+        return s.current_player;
+    }
+
+    // Winning seat of a finished game. A player can only win on their own
+    // turn, so the winner is the turn owner; a game stopped by MAX_TURNS has
+    // no winner.
+    inline constexpr uint8_t winner_of(const GameState& s) noexcept {
+        return s.phase == Phase::ENDED && s.player_vp[s.current_player] >= WIN_VP
+            ? s.current_player
+            : NO_PLAYER;
     }
 
 }

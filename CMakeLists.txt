@@ -78,9 +78,15 @@ if(NOT SKBUILD)
     target_compile_options(test_outcomes PRIVATE
         $<$<CONFIG:Release>:${FCATAN_RELEASE_FLAGS}>)
 
+    add_executable(test_rules tests/test_rules.cpp)
+    target_link_libraries(test_rules PRIVATE fastcatan_core)
+    target_compile_options(test_rules PRIVATE
+        $<$<CONFIG:Release>:${FCATAN_RELEASE_FLAGS}>)
+
     enable_testing()
     add_test(NAME invariants COMMAND fuzz_invariants 100000)
     add_test(NAME outcomes COMMAND test_outcomes)
+    add_test(NAME rules COMMAND test_rules)
     set_tests_properties(invariants PROPERTIES
         TIMEOUT 900
         PASS_REGULAR_EXPRESSION "invariant failures: 0")

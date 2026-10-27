@@ -46,6 +46,8 @@ void validate_snapshot(const GameState& s, const BoardLayout& b) {
             && s.largest_army_owner >= NUM_PLAYERS)
         || (s.trade_proposer != NO_PLAYER
             && s.trade_proposer >= NUM_PLAYERS)
+        || (s.flag == Flag::TRADE_PENDING
+            && s.trade_proposer != s.current_player)
         || s.free_roads_remaining > 2
         || (s.dice_roll != 0 && (s.dice_roll < 2 || s.dice_roll > 12))) {
         throw std::runtime_error("invalid snapshot state");
@@ -98,13 +100,6 @@ void validate_snapshot(const GameState& s, const BoardLayout& b) {
         if (total != 19)
             throw std::runtime_error("invalid snapshot resource total");
     }
-}
-
-uint8_t winner_of(const GameState& state) {
-    for (uint8_t player = 0; player < NUM_PLAYERS; ++player) {
-        if (state.player_vp[player] >= WIN_VP) return player;
-    }
-    return NO_PLAYER;
 }
 
 nb::bytes snapshot_bytes(const GameState& state, const BoardLayout& layout) {

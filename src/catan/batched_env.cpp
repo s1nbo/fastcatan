@@ -52,13 +52,6 @@ T* aligned_array(uint32_t n) noexcept {
     return reinterpret_cast<T*>(p);
 }
 
-inline uint8_t winner_of(const GameState& state) noexcept {
-    for (uint8_t player = 0; player < NUM_PLAYERS; ++player) {
-        if (state.player_vp[player] >= WIN_VP) return player;
-    }
-    return NO_PLAYER;
-}
-
 }  // namespace
 
 bool batched_env_init(BatchedEnv& env, uint32_t n_envs,
@@ -226,9 +219,7 @@ void batched_env_load(BatchedEnv& env, const uint8_t* data) noexcept {
                     sizeof(BoardLayout));
         compute_mask(env.states[i], env.layouts[i],
                      env.states[i].action_mask);
-        env.last_winner[i] = env.states[i].phase == Phase::ENDED
-            ? winner_of(env.states[i])
-            : NO_PLAYER;
+        env.last_winner[i] = winner_of(env.states[i]);
     }
 }
 

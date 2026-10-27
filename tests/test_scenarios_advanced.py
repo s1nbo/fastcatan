@@ -77,6 +77,18 @@ def test_longest_road_threshold_and_strict_exceed():
     assert fires_holder > 0, "no game reached longest-road threshold across 15 seeds"
 
 
+@pytest.mark.parametrize("seed", [0, 1, 2, 3])
+def test_road_lengths_are_tracked_from_setup(seed):
+    """Both setup roads count before the first roll."""
+    rng = random.Random(seed)
+    env = fastcatan.Env()
+    env.reset(seed)
+    while env.phase != 2:
+        env.step(rng.choice(env.legal_actions()))
+    lengths = [env.player_road_length(p) for p in range(4)]
+    assert all(length in (1, 2) for length in lengths), lengths
+
+
 # ---------------------------------------------------------------------------
 # Largest army: same shape — threshold 3, strict exceed.
 # ---------------------------------------------------------------------------
@@ -242,7 +254,8 @@ def test_dev_vp_can_close_game():
             env.step(rng.choice(legals))
             if env.phase == 3:
                 break
-        winner = next(p for p in range(4) if env.player_vp(p) >= 10)
+        winner = env.winner
+        assert winner != NO_PLAYER
         priv = env.player_vp(winner)
         pub = env.player_vp_public(winner)
         assert priv >= 10

@@ -13,27 +13,11 @@ static inline void recompute_full(const GameState& s,
                                    const BoardLayout& b,
                                    uint64_t mask[MASK_WORDS]) noexcept;
 
-// --- Longest-road component membership maintenance (see state.hpp) ---------
-// A node becomes a member of `player`'s longest-road graph when the player
-// builds an incident road/settlement while the node is not enemy-occupied.
-// Membership is the set of valid path endpoints in longest_road_for.
-inline void add_member_node(GameState& s, uint8_t player, uint8_t node) noexcept {
-    s.road_node_member[player] |= (uint64_t(1) << node);
-}
-inline bool member_node(const GameState& s, uint8_t player, uint8_t node) noexcept {
-    return (s.road_node_member[player] >> node) & 1u;
-}
-// Mark both endpoints of a freshly built road as members, except an endpoint
-// already occupied by an opponent.
-inline void mark_road_endpoints(GameState& s, uint8_t edge_id, uint8_t player) noexcept {
-    for (uint8_t i = 0; i < 2; ++i) {
-        uint8_t v = topology::edge_to_node[edge_id][i];
-        uint8_t n = s.node[v];
-        bool enemy = (node_level(n) != NODE_EMPTY) && (node_owner(n) != player);
-        if (!enemy) add_member_node(s, player, v);
-    }
-}
 namespace {
+
+// Defined with the longest-road algorithm below; setup placements use it too.
+inline void check_longest_road(GameState& s) noexcept;
+
 // 19 hex tiles: 3 brick, 4 lumber, 4 wool, 4 grain, 3 ore, 1 desert.
 // Resource codes match BoardLayout::hex_resource semantics in state.hpp.
 constexpr uint8_t HEX_RESOURCE_BAG[19] = {
@@ -279,7 +263,6 @@ inline void place_settlement(GameState& s, const BoardLayout& b,
     s.player_settlement_count[player] -= 1;
     s.player_vp[player] += 1;
     s.player_vp_without_dev[player] += 1;
-    add_member_node(s, player, node_id);  // settlement node is a road-graph endpoint
     grant_port(s, b, node_id, player);
     if (payout) payout_second_placement(s, b, node_id, player);
 }
@@ -287,7 +270,6 @@ inline void place_settlement(GameState& s, const BoardLayout& b,
 inline void place_road(GameState& s, uint8_t edge_id, uint8_t player) noexcept {
     s.edge[edge_id] = player;
     s.player_road_count[player] -= 1;
-    mark_road_endpoints(s, edge_id, player);
 }
 
 // After placing road, advance to next initial-placement turn or transition phase.
@@ -332,6 +314,9 @@ inline void handle_initial_placement(GameState& s, const BoardLayout& b, uint32_
         place_road(s, edge_id, s.current_player);
         advance_initial_turn(s);
     }
+    // Keep player_road_length current; a setup settlement can also split an
+    // opponent's road.
+    check_longest_road(s);
 }
 
 }  // namespace
@@ -342,9 +327,7 @@ inline void handle_initial_placement(GameState& s, const BoardLayout& b, uint32_
 
 namespace {
 
-// Forward decls — defined later in this anon namespace.
-inline void check_game_ended(GameState& s) noexcept;
-inline void check_longest_road(GameState& s) noexcept;
+// Forward decl — defined later in this anon namespace.
 inline void clear_trade_scratch(GameState& s) noexcept;
 
 // Build costs, indexed [brick, lumber, wool, grain, ore].
@@ -368,17 +351,20 @@ inline void pay_to_bank(GameState& s, uint8_t player, const uint8_t cost[5]) noe
 }
 
 // MAIN-phase road legality. The caller has already checked the edge is empty.
-// An empty edge is buildable iff it is incident to a node in the player's road
-// component (road_node_member). Component nodes are retained even after an opponent
-// settles on them, so a road may extend from a node the player reached earlier
-// (with a settlement or a road built while the node was not enemy-occupied)
-// even if that node now carries an enemy building. Conversely a node the
-// player only reached by building INTO an existing enemy building never joined
-// the component and does not make incident edges buildable.
+// A new road must connect at an endpoint holding the player's own building, or
+// at an endpoint free of buildings where the player already has a road. Roads
+// never continue through an opponent's settlement or city.
 inline bool road_connects(const GameState& s, uint8_t edge_id, uint8_t player) noexcept {
-    uint8_t u = topology::edge_to_node[edge_id][0];
-    uint8_t v = topology::edge_to_node[edge_id][1];
-    return member_node(s, player, u) || member_node(s, player, v);
+    for (uint8_t i = 0; i < 2; ++i) {
+        uint8_t v = topology::edge_to_node[edge_id][i];
+        uint8_t n = s.node[v];
+        if (node_level(n) != NODE_EMPTY) {
+            if (node_owner(n) == player) return true;
+        } else if (any_player_road_at(s, v, player)) {
+            return true;
+        }
+    }
+    return false;
 }
 
 inline void handle_build_settle(GameState& s, const BoardLayout& b, uint32_t action) noexcept {
@@ -395,7 +381,6 @@ inline void handle_build_settle(GameState& s, const BoardLayout& b, uint32_t act
     place_settlement(s, b, node_id, pl, /*payout=*/false);
     // Settlement might split an opponent's road graph at this node.
     check_longest_road(s);
-    check_game_ended(s);
 }
 
 inline void handle_build_city(GameState& s, uint32_t action) noexcept {
@@ -415,7 +400,6 @@ inline void handle_build_city(GameState& s, uint32_t action) noexcept {
     s.player_settlement_count[pl] += 1;  // settlement piece returns to player's stock
     s.player_vp[pl]               += 1;
     s.player_vp_without_dev[pl]   += 1;
-    check_game_ended(s);
 }
 
 inline void handle_build_road(GameState& s, uint32_t action) noexcept {
@@ -431,16 +415,13 @@ inline void handle_build_road(GameState& s, uint32_t action) noexcept {
     pay_to_bank(s, pl, COST_ROAD);
     place_road(s, edge_id, pl);
     check_longest_road(s);
-    check_game_ended(s);
 }
 
+// A player wins only on their own turn. Anyone who reaches WIN_VP during
+// another player's turn wins when their own turn begins (if still >= WIN_VP).
 inline void check_game_ended(GameState& s) noexcept {
-    for (uint8_t p = 0; p < NUM_PLAYERS; ++p) {
-        if (s.player_vp[p] >= WIN_VP) {
-            s.phase = Phase::ENDED;
-            return;
-        }
-    }
+    if (s.phase == Phase::MAIN && s.player_vp[s.current_player] >= WIN_VP)
+        s.phase = Phase::ENDED;
 }
 
 // Apply the outcome of a known dice roll (sum 2..12): a 7 triggers
@@ -493,14 +474,23 @@ inline void apply_roll_outcome(GameState& s, const BoardLayout& b, uint8_t roll)
         }
     }
 
-    // Apply per resource. Under the bank-shortage rule, a resource is paid only
-    // if the bank covers the FULL demand across all players; otherwise it is
-    // "depleted" and NO player receives any of it — there is no partial payout
-    // even when a single player is the sole recipient.
+    // Apply per resource. If the bank cannot cover the full demand, nobody
+    // receives that resource, unless only one player is owed it: that player
+    // takes whatever the bank has left.
     for (uint8_t r = 0; r < NUM_RESOURCES; ++r) {
         uint8_t total = 0;
-        for (uint8_t p = 0; p < NUM_PLAYERS; ++p) total += demand[p][r];
-        if (total == 0 || total > s.bank[r]) continue;  // none owed, or depleted
+        uint8_t recipients = 0;
+        for (uint8_t p = 0; p < NUM_PLAYERS; ++p) {
+            total += demand[p][r];
+            if (demand[p][r] > 0) ++recipients;
+        }
+        if (total == 0) continue;
+        if (total > s.bank[r]) {
+            if (recipients > 1) continue;  // shortage shared by several players
+            for (uint8_t p = 0; p < NUM_PLAYERS; ++p) {
+                if (demand[p][r] > 0) demand[p][r] = s.bank[r];
+            }
+        }
 
         for (uint8_t p = 0; p < NUM_PLAYERS; ++p) {
             if (demand[p][r] == 0) continue;
@@ -703,7 +693,6 @@ inline void check_largest_army(GameState& s) noexcept {
         s.player_vp_without_dev[s.current_player] += LARGEST_ARMY_VP;
         s.player_vp[s.current_player] += LARGEST_ARMY_VP;
         s.largest_army_owner = s.current_player;
-        check_game_ended(s);
     }
 } 
 
@@ -720,7 +709,6 @@ inline void apply_buy_dev_card(GameState& s, uint8_t card) noexcept {
         s.player_dev[current][card] += 1;
         s.player_vp[current]        += 1;
         // public VP does NOT change — VP cards stay hidden until win reveal.
-        check_game_ended(s);
     } else {
         s.player_dev_bought_this_turn[current][card] += 1;
     }
@@ -763,7 +751,6 @@ inline void handle_play_knight(GameState& s) noexcept {
     s.flag                           = Flag::MOVE_ROBBER;
 
     check_largest_army(s);
-    check_game_ended(s);
 }
 
 // True if player has at least one legal road placement on the current board.
@@ -785,7 +772,8 @@ constexpr uint8_t LONGEST_ROAD_VP        = 2;
 
 // Recursive DFS body. Marks `edge` as visited; explores onward edges that
 // share `exit_node = the other endpoint`. Path length = edges traversed.
-// Opponent-occupied nodes block continuation through them.
+// An opponent's building ends the road: the edge into it counts, but the path
+// cannot continue through it.
 static uint8_t lr_dfs(const GameState& s, uint8_t player,
                        uint8_t edge, uint8_t entry_node,
                        bool* visited) noexcept {
@@ -812,23 +800,12 @@ static uint8_t lr_dfs(const GameState& s, uint8_t player,
     }
 
     visited[edge] = false;
-    // An edge whose far (exit) node is opponent-occupied does not count: a route
-    // can never step onto an enemy node, so such a segment is
-    // only ever counted by *starting* at the enemy node (handled by allowing
-    // member enemy nodes as DFS roots in longest_road_for), i.e. traversing
-    // it the other direction where the enemy node is the entry, not the exit.
-    return uint8_t((blocked ? 0u : 1u) + max_branch);
+    return uint8_t(1u + max_branch);
 }
 
 inline uint8_t longest_road_for(const GameState& s, uint8_t player) noexcept {
     uint8_t best = 0;
     for (uint8_t v = 0; v < topology::NUM_NODES; ++v) {
-        // Valid path roots are this player's component members only. This
-        // includes nodes now occupied by an opponent that the player had
-        // already reached with a road, and excludes enemy nodes reached after
-        // the opponent settled there.
-        if (!member_node(s, player, v)) continue;
-
         for (uint8_t k = 0; k < topology::MAX_EDGES_PER_NODE; ++k) {
             uint8_t e = topology::node_to_edge[v][k];
             if (e == topology::NO_EDGE) break;
@@ -844,54 +821,52 @@ inline uint8_t longest_road_for(const GameState& s, uint8_t player) noexcept {
 
 // Recompute every player's longest-road length and update the title.
 // Called after any action that could mutate the road graph (own road build,
-// free road via RB, opponent settlement that may split a road).
+// free road via RB, any settlement that may split a road).
 //
-// Title rules:
-//   - Need >=5 to claim.
-//   - Holder loses title if their length drops below 5 (e.g., cut by an opponent).
-//   - Transfer only on STRICT exceed (ties keep incumbent).
+// Title rules (catan.com base-game FAQ):
+//   - The holder keeps the card while their road is >= 5 and no other road is
+//     strictly longer; an equal-length road does not take it.
+//   - Otherwise the card goes to the single player with the longest road of
+//     >= 5. If several players tie for it, or nobody reaches 5, nobody holds
+//     the card until exactly one player is longest.
 inline void check_longest_road(GameState& s) noexcept {
     uint8_t lens[NUM_PLAYERS];
+    uint8_t longest = 0;
     for (uint8_t p = 0; p < NUM_PLAYERS; ++p) {
         lens[p] = longest_road_for(s, p);
         s.player_road_length[p] = lens[p];
+        if (lens[p] > longest) longest = lens[p];
     }
 
     uint8_t holder = s.longest_road_owner;
-    uint8_t holder_len = (holder != NO_PLAYER) ? lens[holder] : 0;
-
-    // Cut-below-threshold: holder loses title.
-    if (holder != NO_PLAYER && holder_len < LONGEST_ROAD_THRESHOLD) {
-        s.player_vp[holder]              -= LONGEST_ROAD_VP;
-        s.player_vp_without_dev[holder]  -= LONGEST_ROAD_VP;
-        s.longest_road_owner             = NO_PLAYER;
-        holder = NO_PLAYER;
-        holder_len = 0;
+    if (holder != NO_PLAYER
+        && lens[holder] >= LONGEST_ROAD_THRESHOLD
+        && lens[holder] == longest) {
+        return;
     }
 
-    uint8_t threshold = (holder == NO_PLAYER) ? LONGEST_ROAD_THRESHOLD
-                                              : uint8_t(holder_len + 1);
-    // Seed just below the threshold so reaching it exactly claims the title.
-    // (Previously hard-coded to 5, which forced the first claimant to reach 6:
-    // a player with exactly 5 roads and no incumbent never got the title.)
-    uint8_t winner   = NO_PLAYER;
-    uint8_t winner_n = uint8_t(threshold - 1);
-    for (uint8_t p = 0; p < NUM_PLAYERS; ++p) {
-        if (lens[p] >= threshold && lens[p] > winner_n) {
-            winner   = p;
-            winner_n = lens[p];
+    uint8_t winner = NO_PLAYER;
+    if (longest >= LONGEST_ROAD_THRESHOLD) {
+        for (uint8_t p = 0; p < NUM_PLAYERS; ++p) {
+            if (lens[p] != longest) continue;
+            if (winner != NO_PLAYER) {  // tied for longest: nobody qualifies
+                winner = NO_PLAYER;
+                break;
+            }
+            winner = p;
         }
     }
 
-    if (winner == NO_PLAYER || winner == holder) return;
-
+    if (winner == holder) return;
     if (holder != NO_PLAYER) {
         s.player_vp[holder]              -= LONGEST_ROAD_VP;
         s.player_vp_without_dev[holder]  -= LONGEST_ROAD_VP;
     }
     s.longest_road_owner = winner;
-    s.player_vp[winner]              += LONGEST_ROAD_VP;
-    s.player_vp_without_dev[winner]  += LONGEST_ROAD_VP;
+    if (winner != NO_PLAYER) {
+        s.player_vp[winner]              += LONGEST_ROAD_VP;
+        s.player_vp_without_dev[winner]  += LONGEST_ROAD_VP;
+    }
 }
 
 inline void handle_play_road_building(GameState& s) noexcept {
@@ -927,14 +902,12 @@ inline void handle_place_road(GameState& s, uint32_t action) noexcept {
     s.edge[edge_id] = pl;
     s.player_road_count[pl] -= 1;
     s.free_roads_remaining  -= 1;
-    mark_road_endpoints(s, edge_id, pl);
     check_longest_road(s);
 
     if (s.free_roads_remaining == 0 || !has_any_legal_road(s, pl) || s.player_road_count[pl] == 0) {
         s.free_roads_remaining = 0;
         s.flag                 = Flag::NONE;
     }
-    check_game_ended(s);
 }
 
 inline void handle_play_yop(GameState& s, uint32_t action) noexcept {
@@ -1056,8 +1029,8 @@ inline void handle_trade_add_want(GameState& s, uint32_t action) noexcept {
     s.trade_want[r] += 1;
 }
 
-// Open the proposal: validate, set TRADE_PENDING flag, hand control to first
-// responder (clockwise from proposer).
+// Open the proposal: validate and set TRADE_PENDING. current_player stays the
+// proposer; actor_to_act walks the responders clockwise from the proposer.
 inline void handle_trade_open(GameState& s) noexcept {
     if (!trade_scratch_valid(s)) return;
     uint8_t pl = s.current_player;
@@ -1069,18 +1042,14 @@ inline void handle_trade_open(GameState& s) noexcept {
     s.trade_response = 0;
     s.trade_response = set_tr(s.trade_response, pl, TR_NA);
     s.flag = Flag::TRADE_PENDING;
-
-    // First responder (clockwise from proposer)
-    uint8_t first_resp = uint8_t((pl + 1) & 0x3);
-    s.current_player = first_resp;
 }
 
 // Responder accept/decline. If they auto-fail validation (insufficient resources
 // for the requested bundle), force a decline to keep the protocol clean.
 inline void handle_trade_response(GameState& s, bool wanted_accept) noexcept {
     if (s.flag != Flag::TRADE_PENDING) return;
-    if (s.current_player == s.trade_proposer) return;  // confirm phase
-    uint8_t pl = s.current_player;
+    uint8_t pl = actor_to_act(s);
+    if (pl == s.trade_proposer) return;  // confirm phase
     if (get_tr(s.trade_response, pl) != TR_PENDING) return;
 
     bool can_accept = wanted_accept;
@@ -1092,24 +1061,15 @@ inline void handle_trade_response(GameState& s, bool wanted_accept) noexcept {
             }
         }
     }
+    // actor_to_act moves on to the next pending responder, then back to the
+    // proposer once everyone has answered.
     s.trade_response = set_tr(s.trade_response, pl,
                                can_accept ? TR_ACCEPT : TR_DECLINE);
-
-    // Advance to next pending responder (clockwise from proposer).
-    for (uint8_t i = 1; i < NUM_PLAYERS; ++i) {
-        uint8_t p = uint8_t((s.trade_proposer + i) & 0x3);
-        if (get_tr(s.trade_response, p) == TR_PENDING) {
-            s.current_player = p;
-            return;
-        }
-    }
-    // All responded — back to proposer for confirm/cancel.
-    s.current_player = s.trade_proposer;
 }
 
 inline void handle_trade_confirm(GameState& s, uint32_t action) noexcept {
     if (s.flag != Flag::TRADE_PENDING) return;
-    if (s.current_player != s.trade_proposer) return;  // wait for confirm phase
+    if (actor_to_act(s) != s.trade_proposer) return;  // wait for confirm phase
     uint32_t off = action - action::TRADE_CONFIRM_BASE;
     if (off >= NUM_PLAYERS) return;
     uint8_t partner = uint8_t(off);
@@ -1146,7 +1106,7 @@ inline void handle_trade_cancel(GameState& s) noexcept {
         return;
     }
     if (s.flag != Flag::TRADE_PENDING) return;
-    if (s.current_player != s.trade_proposer) return;
+    if (actor_to_act(s) != s.trade_proposer) return;
     clear_trade_scratch(s);
     s.flag = Flag::NONE;
 }
@@ -1243,7 +1203,7 @@ inline void handle_main(GameState& s, const BoardLayout& b, uint32_t action) noe
                 }
                 break;
             case Flag::TRADE_PENDING:
-                if (s.current_player == s.trade_proposer) {
+                if (actor_to_act(s) == s.trade_proposer) {
                     // Confirm phase: pick accepting partner or cancel.
                     if (action >= action::TRADE_CONFIRM_BASE
                         && action <  action::TRADE_CONFIRM_BASE + NUM_PLAYERS) {
@@ -1278,6 +1238,16 @@ inline void handle_main(GameState& s, const BoardLayout& b, uint32_t action) noe
     else if (action == action::BUY_DEV)                                         handle_buy_dev(s);
     else if (dispatch_dev_play(s, action))                                      ;  // handled
     else                                                                        dispatch_trade_compose(s, action);
+}
+
+// Shared tail of every accepted transition: own-turn win check (which also
+// covers a player whose turn starts with >= WIN_VP), the MAX_TURNS length
+// backstop, and the legal-action mask.
+inline void finalize_transition(GameState& s, const BoardLayout& b) noexcept {
+    check_game_ended(s);
+    if (s.phase != Phase::ENDED && s.turn_count >= MAX_TURNS)
+        s.phase = Phase::ENDED;
+    recompute_full(s, b, s.action_mask);
 }
 
 }  // namespace
@@ -1317,14 +1287,7 @@ bool step_one(GameState& s, const BoardLayout& b, uint32_t action) noexcept {
             break;
     }
 
-    // Length backstop (single length authority): end a no-winner game once it
-    // hits MAX_TURNS turns. The trade-compose cap guarantees turns end, so
-    // turn_count advances and this is reachable.
-    if (s.phase != Phase::ENDED && s.turn_count >= MAX_TURNS) {
-        s.phase = Phase::ENDED;
-    }
-
-    recompute_full(s, b, s.action_mask);
+    finalize_transition(s, b);
     return s.phase == Phase::ENDED;
 }
 
@@ -1340,13 +1303,6 @@ inline bool action_is_legal(const GameState& s, const BoardLayout& b,
     uint64_t fresh[MASK_WORDS];
     compute_mask(s, b, fresh);
     return fresh[action_id >> 6] & (uint64_t(1) << (action_id & 63));
-}
-
-inline void finalize_outcome(GameState& state,
-                             const BoardLayout& layout) noexcept {
-    if (state.phase != Phase::ENDED && state.turn_count >= MAX_TURNS)
-        state.phase = Phase::ENDED;
-    recompute_full(state, layout, state.action_mask);
 }
 
 inline double dice_probability(uint8_t sum) noexcept {
@@ -1376,7 +1332,7 @@ uint32_t enumerate_action_outcomes(
             child.trade_compose_count = 0;
             child.rng.bounded(36);
             apply_roll_outcome(child, b, sum);
-            finalize_outcome(child, b);
+            finalize_transition(child, b);
             out_states[count] = child;
             out_probabilities[count] = dice_probability(sum);
             ++count;
@@ -1395,7 +1351,7 @@ uint32_t enumerate_action_outcomes(
             child.rng.bounded(total);
             pay_to_bank(child, child.current_player, COST_DEV);
             apply_buy_dev_card(child, card);
-            finalize_outcome(child, b);
+            finalize_transition(child, b);
             out_states[count] = child;
             out_probabilities[count] =
                 double(s.dev_deck[card]) / double(total);
@@ -1415,7 +1371,7 @@ uint32_t enumerate_action_outcomes(
             base.flag = candidate_count == 0
                 ? Flag::NONE
                 : Flag::ROBBER_STEAL;
-            finalize_outcome(base, b);
+            finalize_transition(base, b);
             out_states[0] = base;
             out_probabilities[0] = 1.0;
             return 1;
@@ -1430,7 +1386,7 @@ uint32_t enumerate_action_outcomes(
             GameState child = base;
             do_steal_resource(child, victim, resource);
             child.flag = Flag::NONE;
-            finalize_outcome(child, b);
+            finalize_transition(child, b);
             out_states[count] = child;
             out_probabilities[count] = double(held) / total;
             ++count;
@@ -1449,7 +1405,7 @@ uint32_t enumerate_action_outcomes(
             child.rng.bounded(uint32_t(total));
             do_steal_resource(child, victim, resource);
             child.flag = Flag::NONE;
-            finalize_outcome(child, b);
+            finalize_transition(child, b);
             out_states[count] = child;
             out_probabilities[count] = double(held) / total;
             ++count;
@@ -1550,7 +1506,7 @@ static inline void recompute_full(const GameState& s,
                 break;
             }
             case Flag::TRADE_PENDING: {
-                if (s.current_player == s.trade_proposer) {
+                if (actor_to_act(s) == s.trade_proposer) {
                     // Confirm phase. CANCEL always legal; CONFIRM_p for accepters.
                     set_bit(action::TRADE_CANCEL);
                     for (uint8_t p = 0; p < NUM_PLAYERS; ++p) {

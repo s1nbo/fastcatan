@@ -35,6 +35,9 @@ cmake.version = ">=3.27"
 cmake.build-type = "Release"
 build-dir = "build/{wheel_tag}"
 wheel.packages = ["python/fastcatan"]
+# viz/ (game-log viewer) is development tooling kept in the repo; ship it in
+# neither the wheel (never installed) nor the source distribution.
+sdist.exclude = ["viz/"]
 # nanobind STABLE_ABI -> tag the wheel abi3 (cp312-abi3), so one build serves 3.12+.
 wheel.py-api = "cp312"
 # Reuse our top-level CMakeLists; SKBUILD flag enables the nanobind branch.

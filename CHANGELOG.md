@@ -2,6 +2,53 @@
 
 All notable changes to FastCatan are documented here.
 
+## 2.1.0 - 2026-10-29
+
+Native observation encoding and event logging for reinforcement-learning
+loops over large batches. No rule changes: outcomes are identical to 2.0.1 for
+the same seed and actions.
+
+### Added
+
+- `write_obs` on `Env` and `BatchedEnv` encodes a game as `OBS_SIZE` float32
+  features from one seat's point of view, with that seat at relative slot 0.
+  `write_obs_pov` takes a seat per game. The encoding exposes public
+  information plus the observing seat's own private information only, and is
+  versioned by `OBS_VERSION`.
+- `BatchedEnv.write_actors` and `BatchedEnv.write_status` read the acting seat
+  and a `done`/`winner`/`turn_count`/`current_player` row for every game
+  without a per-game call.
+- An opt-in native event log: `enable_log`, `disable_log`, `drain_events`,
+  `pending_events`, `log_overflow`, `log_mask`, and `log_capacity_per_env`.
+  `LOG_TRADES` records player trades, `LOG_GAMES` records game boundaries, and
+  `LOG_ACTIONS` records every `(actor, action)`, which replays a game exactly
+  when combined with the recorded seed. Records are fixed-width int32 rows
+  described by `EVENT_FIELDS` and versioned by `EVENT_VERSION`.
+- `BatchedEnv` per-game episode bookkeeping: `game_id`, `game_seed`, and
+  `step_in_game`.
+- `BatchedEnv` getters mirroring `Env` for parity checks and debugging: `flag`,
+  `turn_count`, `player_vp_public`, `trade_proposer`, `trade_compose_count`,
+  `trade_give`, `trade_want`, and `trade_response`.
+- Field-layout maps `OBS_FIELDS`, `EVENT_FIELDS`, and `STATUS_FIELDS`.
+
+### Changed
+
+- `run_random_games` now raises while event recording is enabled. It plays
+  whole games without entering the batched step loop, so it cannot record
+  events, and failing is better than returning an empty log.
+
+### Notes
+
+The observation encoder is a port of the 1084-float encoder from the
+pre-2.0 line, corrected for two information leaks: the per-type development
+deck remainder is replaced by the deck size, since the breakdown reveals which
+card types opponents hold, and an unopened trade draft is now hidden from every
+seat but its owner. With the actor flag, the fourth trade response, and the
+compose budget added, `OBS_SIZE` is 1089.
+
+The event log is not part of a snapshot. Enable it before `reset` to capture
+the first episode's start.
+
 ## 2.0.1 - 2026-10-27
 
 Rule fixes that follow the [catan.com base-game FAQ](https://www.catan.com/faq/basegame).

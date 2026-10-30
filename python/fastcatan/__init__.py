@@ -18,7 +18,17 @@ from ._fastcatan import (  # noqa: F401
     SNAPSHOT_BYTES,
     MAX_ACTION_OUTCOMES,
     STATE_VIEW_VERSION,
+    OBS_SIZE,
+    OBS_VERSION,
+    OBS_PER_PLAYER,
+    OBS_FIELDS,
+    EVENT_INTS,
+    EVENT_VERSION,
+    EVENT_FIELDS,
+    STATUS_INTS,
+    STATUS_FIELDS,
     action,
+    log,
 )
 
 __all__ = [
@@ -37,7 +47,17 @@ __all__ = [
     "SNAPSHOT_BYTES",
     "MAX_ACTION_OUTCOMES",
     "STATE_VIEW_VERSION",
+    "OBS_SIZE",
+    "OBS_VERSION",
+    "OBS_PER_PLAYER",
+    "OBS_FIELDS",
+    "EVENT_INTS",
+    "EVENT_VERSION",
+    "EVENT_FIELDS",
+    "STATUS_INTS",
+    "STATUS_FIELDS",
     "action",
+    "log",
 ]
 
 __version__ = _version("fastcatan")

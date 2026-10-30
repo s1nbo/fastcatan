@@ -45,6 +45,9 @@ set(FCATAN_RELEASE_FLAGS
 add_library(fastcatan_core STATIC
     src/catan/rules.cpp
     src/catan/batched_env.cpp
+    src/catan/obs.cpp
+    src/catan/batched_reads.cpp
+    src/catan/event_log.cpp
 )
 target_include_directories(fastcatan_core PUBLIC include)
 target_compile_options(fastcatan_core PRIVATE

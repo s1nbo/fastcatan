@@ -3,6 +3,7 @@
 #include <nanobind/ndarray.h>
 #include <nanobind/stl/vector.h>
 
+#include <algorithm>
 #include <cstring>
 #include <limits>
 #include <new>
@@ -11,7 +12,9 @@
 #include <vector>
 
 #include "batched_env.hpp"
+#include "event_log.hpp"
 #include "mask.hpp"
+#include "obs.hpp"
 #include "rules.hpp"
 #include "topology.hpp"
 
@@ -118,6 +121,22 @@ std::vector<uint32_t> legal_actions_of(const GameState& state) {
         }
     }
     return actions;
+}
+
+// name -> (offset, length) layout map for the flat int32/float records.
+struct Field {
+    const char* name;
+    uint32_t offset;
+    uint32_t length;
+};
+
+nb::dict field_dict(const Field* fields, std::size_t count) {
+    nb::dict layout;
+    for (std::size_t index = 0; index < count; ++index) {
+        layout[fields[index].name] = nb::make_tuple(
+            fields[index].offset, fields[index].length);
+    }
+    return layout;
 }
 
 template <typename Value>
@@ -281,6 +300,20 @@ struct PyBatchedEnv {
         require_initialized();
         check_index(env_idx, inner.n, "env_idx");
     }
+
+    void enable_log(uint32_t mask, uint32_t capacity_per_env) {
+        if (mask == 0 || (mask & ~LOG_ALL) != 0)
+            throw std::runtime_error("log mask out of range");
+        if (capacity_per_env == 0)
+            throw std::runtime_error("capacity_per_env must be positive");
+        if (!event_log_enable(inner.log, inner.n, mask, capacity_per_env))
+            throw std::bad_alloc();
+    }
+
+    void require_log() const {
+        if (inner.log.mask == 0)
+            throw std::runtime_error("event log is not enabled");
+    }
 };
 
 struct PyEnv {
@@ -442,6 +475,16 @@ struct PyEnv {
         check_index(pov, NUM_PLAYERS, "pov");
         return state_view(s, b, uint8_t(pov));
     }
+
+    void obs(uint32_t pov,
+             nb::ndarray<float, nb::ndim<1>, nb::c_contig,
+                         nb::device::cpu> out) const {
+        require_initialized();
+        check_index(pov, NUM_PLAYERS, "pov");
+        if (out.shape(0) != OBS_SIZE)
+            throw std::runtime_error("obs buffer length mismatch");
+        ::catan::write_obs(s, b, uint8_t(pov), out.data());
+    }
 };
 
 }  // namespace
@@ -462,6 +505,91 @@ NB_MODULE(_fastcatan, m) {
     m.attr("SNAPSHOT_BYTES") = uint32_t(SNAPSHOT_BYTES);
     m.attr("MAX_ACTION_OUTCOMES") = MAX_ACTION_OUTCOMES;
     m.attr("STATE_VIEW_VERSION") = STATE_VIEW_VERSION;
+    m.attr("OBS_SIZE") = OBS_SIZE;
+    m.attr("OBS_VERSION") = OBS_VERSION;
+    m.attr("EVENT_INTS") = EVENT_INTS;
+    m.attr("EVENT_VERSION") = EVENT_VERSION;
+    m.attr("STATUS_INTS") = STATUS_INTS;
+
+    {
+        static constexpr Field obs_fields[] = {
+            {"players",            OBS_OFF_PLAYERS,      NUM_PLAYERS * OBS_PER_PLAYER},
+            {"self_private",       OBS_OFF_SELF,         OBS_SELF_PRIVATE},
+            {"nodes",              OBS_OFF_NODES,        2 * NUM_PLAYERS * topology::NUM_NODES},
+            {"edges",              OBS_OFF_EDGES,        NUM_PLAYERS * topology::NUM_EDGES},
+            {"hex_resource",       OBS_OFF_HEX_RESOURCE, 6 * topology::NUM_HEXES},
+            {"hex_number",         OBS_OFF_HEX_NUMBER,   topology::NUM_HEXES},
+            {"port_type",          OBS_OFF_PORT_TYPE,    6 * topology::NUM_PORTS},
+            {"robber",             OBS_OFF_ROBBER,       topology::NUM_HEXES},
+            {"phase",              OBS_OFF_PHASE,        4},
+            {"flag",               OBS_OFF_FLAG,         8},
+            {"dice_roll",          OBS_OFF_DICE,         13},
+            {"turn_count",         OBS_OFF_TURN,         1},
+            {"bank",               OBS_OFF_BANK,         NUM_RESOURCES},
+            {"dev_deck_size",      OBS_OFF_DEV_DECK,     1},
+            {"longest_road_owner", OBS_OFF_LONGEST_ROAD, 5},
+            {"largest_army_owner", OBS_OFF_LARGEST_ARMY, 5},
+            {"start_player",       OBS_OFF_START_PLAYER, 4},
+            {"free_roads",         OBS_OFF_FREE_ROADS,   1},
+            {"dev_card_played",    OBS_OFF_DEV_PLAYED,   1},
+            {"trade_compose",      OBS_OFF_COMPOSE,      1},
+            {"trade_proposer",     OBS_OFF_TRADE_PROP,   5},
+            {"trade_give",         OBS_OFF_TRADE_GIVE,   NUM_RESOURCES},
+            {"trade_want",         OBS_OFF_TRADE_WANT,   NUM_RESOURCES},
+            {"trade_response",     OBS_OFF_TRADE_RESP,   4 * NUM_PLAYERS},
+        };
+        m.attr("OBS_FIELDS") = field_dict(
+            obs_fields, sizeof(obs_fields) / sizeof(obs_fields[0]));
+        m.attr("OBS_PER_PLAYER") = OBS_PER_PLAYER;
+
+        static constexpr Field event_fields[] = {
+            {"env_idx",      EV_ENV_IDX,      1},
+            {"game_id",      EV_GAME_ID,      1},
+            {"step_in_game", EV_STEP_IN_GAME, 1},
+            {"turn",         EV_TURN,         1},
+            {"event_type",   EV_EVENT_TYPE,   1},
+            {"actor",        EV_ACTOR,        1},
+            {"action",       EV_ACTION,       1},
+            {"proposer",     EV_PROPOSER,     1},
+            {"partner",      EV_PARTNER,      1},
+            {"give",         EV_GIVE,         NUM_RESOURCES},
+            {"want",         EV_WANT,         NUM_RESOURCES},
+            {"public_vp",    EV_PUBLIC_VP,    NUM_PLAYERS},
+            {"true_vp",      EV_TRUE_VP,      NUM_PLAYERS},
+            {"handsize",     EV_HANDSIZE,     NUM_PLAYERS},
+            {"winner",       EV_WINNER,       1},
+            {"turns",        EV_TURNS,        1},
+            {"steps",        EV_STEPS,        1},
+            {"seed_lo",      EV_SEED_LO,      1},
+            {"seed_hi",      EV_SEED_HI,      1},
+        };
+        m.attr("EVENT_FIELDS") = field_dict(
+            event_fields, sizeof(event_fields) / sizeof(event_fields[0]));
+
+        static constexpr Field status_fields[] = {
+            {"done",           STATUS_DONE,           1},
+            {"winner",         STATUS_WINNER,         1},
+            {"turn_count",     STATUS_TURN_COUNT,     1},
+            {"current_player", STATUS_CURRENT_PLAYER, 1},
+        };
+        m.attr("STATUS_FIELDS") = field_dict(
+            status_fields, sizeof(status_fields) / sizeof(status_fields[0]));
+    }
+
+    nb::module_ log = m.def_submodule(
+        "log", "Event-log mask bits and event-type constants.");
+    log.attr("LOG_TRADES") = LOG_TRADES;
+    log.attr("LOG_GAMES") = LOG_GAMES;
+    log.attr("LOG_ACTIONS") = LOG_ACTIONS;
+    log.attr("LOG_ALL") = LOG_ALL;
+    log.attr("GAME_START") = EVENT_GAME_START;
+    log.attr("GAME_END") = EVENT_GAME_END;
+    log.attr("ACTION") = EVENT_ACTION;
+    log.attr("TRADE_OPEN") = EVENT_TRADE_OPEN;
+    log.attr("TRADE_ACCEPT") = EVENT_TRADE_ACCEPT;
+    log.attr("TRADE_DECLINE") = EVENT_TRADE_DECLINE;
+    log.attr("TRADE_CONFIRM") = EVENT_TRADE_CONFIRM;
+    log.attr("TRADE_CANCEL") = EVENT_TRADE_CANCEL;
 
     nb::module_ act = m.def_submodule("action", "Flat action ID layout.");
     act.attr("SETTLE_BASE") = action::SETTLE_BASE;
@@ -541,6 +669,9 @@ NB_MODULE(_fastcatan, m) {
              nb::arg("action"),
              "Return exact physical outcomes as (probability, snapshot) pairs. "
              "Deterministic and illegal actions produce one outcome.")
+        .def("write_obs", &PyEnv::obs, nb::arg("pov"), nb::arg("out"),
+             "Encode the game from `pov`'s perspective into a float32 buffer "
+             "of length OBS_SIZE.")
         .def("state_view", &PyEnv::view, nb::arg("pov"),
              "Return a semantic state dictionary that exposes private cards "
              "only for the requested player.")
@@ -555,6 +686,9 @@ NB_MODULE(_fastcatan, m) {
     using ArrU8_2D = nb::ndarray<uint8_t, nb::ndim<2>, nb::c_contig, nb::device::cpu>;
     using ArrU64 = nb::ndarray<const uint64_t, nb::ndim<1>, nb::c_contig, nb::device::cpu>;
     using ArrU64_2D = nb::ndarray<uint64_t, nb::ndim<2>, nb::c_contig, nb::device::cpu>;
+    using ArrConstU8 = nb::ndarray<const uint8_t, nb::ndim<1>, nb::c_contig, nb::device::cpu>;
+    using ArrI32_2D = nb::ndarray<int32_t, nb::ndim<2>, nb::c_contig, nb::device::cpu>;
+    using ArrF32_2D = nb::ndarray<float, nb::ndim<2>, nb::c_contig, nb::device::cpu>;
 
     nb::class_<PyBatchedEnv>(m, "BatchedEnv",
         "A contiguous collection of independent Catan games.")
@@ -588,6 +722,12 @@ NB_MODULE(_fastcatan, m) {
             e.require_initialized();
             if (num_games == 0)
                 throw std::runtime_error("num_games must be positive");
+            // The native rollout plays whole games without entering the
+            // batched step loop, so it cannot record events. Failing loudly
+            // beats handing back an empty log.
+            if (e.inner.log.mask != 0)
+                throw std::runtime_error(
+                    "run_random_games cannot record events; call disable_log first");
             uint64_t total_steps = 0;
             uint64_t completed = 0;
             {
@@ -606,6 +746,80 @@ NB_MODULE(_fastcatan, m) {
             nb::gil_scoped_release release;
             batched_env_write_masks(e.inner, out.data());
         }, nb::arg("out"))
+        .def("write_actors", [](const PyBatchedEnv& e, ArrU8 out) {
+            e.require_initialized();
+            if (out.shape(0) != e.inner.n)
+                throw std::runtime_error("actor buffer length mismatch");
+            nb::gil_scoped_release release;
+            batched_env_write_actors(e.inner, out.data());
+        }, nb::arg("out"),
+        "Write the seat that must act in each game into a uint8[n] array.")
+        .def("write_status", [](const PyBatchedEnv& e, ArrI32_2D out) {
+            e.require_initialized();
+            if (out.shape(0) != e.inner.n || out.shape(1) != STATUS_INTS)
+                throw std::runtime_error("status buffer shape mismatch");
+            nb::gil_scoped_release release;
+            batched_env_write_status(e.inner, out.data());
+        }, nb::arg("out"),
+        "Write one int32 row per game into an int32[n, STATUS_INTS] array; "
+        "see STATUS_FIELDS for the column layout.")
+        .def("write_obs", [](const PyBatchedEnv& e, ArrF32_2D out) {
+            e.require_initialized();
+            if (out.shape(0) != e.inner.n || out.shape(1) != OBS_SIZE)
+                throw std::runtime_error("obs buffer shape mismatch");
+            nb::gil_scoped_release release;
+            batched_env_write_obs(e.inner, out.data());
+        }, nb::arg("out"),
+        "Fill a float32[n, OBS_SIZE] array; row i is env i encoded from its "
+        "own actor_to_act's perspective.")
+        .def("write_obs_pov", [](const PyBatchedEnv& e, ArrConstU8 seats,
+                                 ArrF32_2D out) {
+            e.require_initialized();
+            if (seats.shape(0) != e.inner.n)
+                throw std::runtime_error("seats length mismatch");
+            if (out.shape(0) != e.inner.n || out.shape(1) != OBS_SIZE)
+                throw std::runtime_error("obs buffer shape mismatch");
+            for (uint32_t index = 0; index < e.inner.n; ++index)
+                check_index(seats.data()[index], NUM_PLAYERS, "seat");
+            nb::gil_scoped_release release;
+            batched_env_write_obs_pov(e.inner, seats.data(), out.data());
+        }, nb::arg("seats"), nb::arg("out"),
+        "Fill a float32[n, OBS_SIZE] array; row i is env i encoded from "
+        "seats[i]'s perspective.")
+        .def("enable_log", [](PyBatchedEnv& e, uint32_t mask,
+                              uint32_t capacity_per_env) {
+            e.enable_log(mask, capacity_per_env);
+        }, nb::arg("mask"), nb::arg("capacity_per_env"),
+        "Start recording events selected by `mask` (see the `log` submodule), "
+        "buffering up to `capacity_per_env` rows per game. Enable before "
+        "reset to capture the first episode's start.")
+        .def("disable_log", [](PyBatchedEnv& e) {
+            event_log_disable(e.inner.log);
+        }, "Stop recording and release the event buffers.")
+        .def_prop_ro("log_mask",
+            [](const PyBatchedEnv& e) { return e.inner.log.mask; },
+            "Recorded event mask, 0 when logging is disabled.")
+        .def_prop_ro("log_capacity_per_env",
+            [](const PyBatchedEnv& e) { return e.inner.log.capacity; })
+        .def_prop_ro("log_overflow", [](const PyBatchedEnv& e) {
+            return event_log_dropped(e.inner.log, e.inner.n);
+        }, "Rows refused because a game's buffer was full, since enable_log. "
+           "Drain more often or raise capacity_per_env if this is non-zero.")
+        .def("pending_events", [](const PyBatchedEnv& e) {
+            return event_log_pending(e.inner.log, e.inner.n);
+        }, "Rows waiting to be drained.")
+        .def("drain_events", [](PyBatchedEnv& e, ArrI32_2D out) {
+            e.require_log();
+            if (out.shape(1) != EVENT_INTS)
+                throw std::runtime_error("event buffer shape mismatch");
+            const uint32_t rows = uint32_t(std::min<int64_t>(
+                out.shape(0), std::numeric_limits<uint32_t>::max()));
+            nb::gil_scoped_release release;
+            return event_log_drain(e.inner.log, e.inner.n, out.data(), rows);
+        }, nb::arg("out"),
+        "Copy pending rows in (env_idx, order) into an int32[cap, EVENT_INTS] "
+        "array and clear them; returns the number of rows written. Rows that "
+        "do not fit stay queued.")
         .def("phase", [](const PyBatchedEnv& e, uint32_t env_idx) {
             e.check_env(env_idx);
             return uint8_t(e.inner.states[env_idx].phase);
@@ -632,6 +846,63 @@ NB_MODULE(_fastcatan, m) {
             e.check_env(env_idx);
             return e.inner.last_winner[env_idx];
         }, nb::arg("env_idx"))
+        .def("flag", [](const PyBatchedEnv& e, uint32_t env_idx) {
+            e.check_env(env_idx);
+            return uint8_t(e.inner.states[env_idx].flag);
+        }, nb::arg("env_idx"))
+        .def("turn_count", [](const PyBatchedEnv& e, uint32_t env_idx) {
+            e.check_env(env_idx);
+            return e.inner.states[env_idx].turn_count;
+        }, nb::arg("env_idx"))
+        .def("player_vp_public", [](const PyBatchedEnv& e, uint32_t env_idx,
+                                    uint32_t player) {
+            e.check_env(env_idx);
+            check_index(player, NUM_PLAYERS, "player");
+            return e.inner.states[env_idx].player_vp_without_dev[player];
+        }, nb::arg("env_idx"), nb::arg("player"))
+        .def("trade_proposer", [](const PyBatchedEnv& e, uint32_t env_idx) {
+            e.check_env(env_idx);
+            return e.inner.states[env_idx].trade_proposer;
+        }, nb::arg("env_idx"))
+        .def("trade_compose_count", [](const PyBatchedEnv& e, uint32_t env_idx) {
+            e.check_env(env_idx);
+            return e.inner.states[env_idx].trade_compose_count;
+        }, nb::arg("env_idx"))
+        .def("trade_give", [](const PyBatchedEnv& e, uint32_t env_idx,
+                              uint32_t resource) {
+            e.check_env(env_idx);
+            check_index(resource, NUM_RESOURCES, "resource");
+            return e.inner.states[env_idx].trade_give[resource];
+        }, nb::arg("env_idx"), nb::arg("resource"))
+        .def("trade_want", [](const PyBatchedEnv& e, uint32_t env_idx,
+                              uint32_t resource) {
+            e.check_env(env_idx);
+            check_index(resource, NUM_RESOURCES, "resource");
+            return e.inner.states[env_idx].trade_want[resource];
+        }, nb::arg("env_idx"), nb::arg("resource"))
+        .def("trade_response", [](const PyBatchedEnv& e, uint32_t env_idx,
+                                  uint32_t player) {
+            e.check_env(env_idx);
+            check_index(player, NUM_PLAYERS, "player");
+            return uint8_t(
+                (e.inner.states[env_idx].trade_response >> (player * 2)) & 0x03);
+        }, nb::arg("env_idx"), nb::arg("player"))
+        .def("game_id", [](const PyBatchedEnv& e, uint32_t env_idx) {
+            e.check_env(env_idx);
+            return e.inner.game_id[env_idx];
+        }, nb::arg("env_idx"),
+        "Episode counter for this slot: 0 after reset, incremented by each "
+        "autoreset.")
+        .def("game_seed", [](const PyBatchedEnv& e, uint32_t env_idx) {
+            e.check_env(env_idx);
+            return e.inner.game_seed[env_idx];
+        }, nb::arg("env_idx"),
+        "Seed the slot's current episode was reset with; replays it exactly.")
+        .def("step_in_game", [](const PyBatchedEnv& e, uint32_t env_idx) {
+            e.check_env(env_idx);
+            return e.inner.step_in_game[env_idx];
+        }, nb::arg("env_idx"),
+        "Actions applied in this slot's current episode.")
         .def("state_view", [](const PyBatchedEnv& e, uint32_t env_idx,
                               uint32_t pov) {
             e.check_env(env_idx);

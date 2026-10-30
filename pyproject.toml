@@ -4,7 +4,7 @@ build-backend = "scikit_build_core.build"
 
 [project]
 name = "fastcatan"
-version = "2.0.1"
+version = "2.1.0"
 description = "High-throughput Catan simulator with Python bindings"
 readme = "README.md"
 # nanobind STABLE_ABI (abi3) requires CPython 3.12+: one wheel covers 3.12/3.13/3.14.
@@ -52,7 +52,7 @@ CMAKE_BUILD_TYPE = "Release"
 build = "cp312-*"                      # abi3 -> also serves 3.13+
 build-frontend = "build"
 # Prove the wheel imports + the native API is present, inside the CI container.
-test-command = "python -c \"import fastcatan as fc; e=fc.Env(); e.reset(0); assert e.legal_actions() and e.state_view(e.actor_to_act)['legal_actions']; assert hasattr(fc.Env,'enumerate_outcomes') and hasattr(fc.BatchedEnv,'load_snapshots'); print('fastcatan', fc.__version__, fc.NUM_ACTIONS)\""
+test-command = "python -c \"import numpy as np, fastcatan as fc; e=fc.Env(); e.reset(0); assert e.legal_actions() and e.state_view(e.actor_to_act)['legal_actions']; assert hasattr(fc.Env,'enumerate_outcomes') and hasattr(fc.BatchedEnv,'load_snapshots'); o=np.zeros(fc.OBS_SIZE, dtype=np.float32); e.write_obs(0, o); assert o.any(); b=fc.BatchedEnv(4); b.enable_log(fc.log.LOG_GAMES, 4); b.reset(); assert b.drain_events(np.zeros((4, fc.EVENT_INTS), dtype=np.int32)) == 4; print('fastcatan', fc.__version__, fc.NUM_ACTIONS, fc.OBS_SIZE)\""
 
 [tool.cibuildwheel.linux]
 # C++23 needs a modern GCC; manylinux_2_28 ships GCC 12+. (2014 image = GCC 10.)
@@ -71,3 +71,7 @@ config-settings = { "cmake.define.FASTCATAN_ARCH" = "x86-64-v2" }
 pythonpath = ["."]
 addopts = "--import-mode=importlib"
 testpaths = ["tests"]
+# Reference-logger and parity sweeps run thousands of games in Python and
+# dominate the suite's runtime. They run by default; `-m "not slow"` skips
+# them while iterating.
+markers = ["slow: multi-thousand-game sweeps (about a minute each)"]

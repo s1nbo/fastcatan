@@ -13,12 +13,15 @@ through [nanobind](https://github.com/wjakob/nanobind).
 - Snapshot and restore support for replay and debugging.
 - Optional batched stepping with OpenMP.
 - Batched observation, actor, and status reads that need no per-game calls.
-- An opt-in native event log for trades, actions, and game boundaries.
+- An opt-in native event log for trades, actions, and game boundaries, with a
+  versioned file format that replays any recorded game exactly.
+- Optional game-log viewer, shipped separately: `pip install fastcatan[viz]`.
 
 ## Install
 
 ```bash
-pip install fastcatan
+pip install fastcatan          # simulator only (depends on NumPy)
+pip install fastcatan[viz]     # plus game logs and the browser viewer
 ```
 
 Prebuilt wheels target Linux x86_64 and macOS Apple Silicon on CPython 3.12+.
@@ -91,6 +94,7 @@ thousands of games therefore needs no per-game Python call at all.
 | Call | Buffer | Contents |
 |---|---|---|
 | `write_masks(out)` | `uint64[n, MASK_WORDS]` | legal-action bitset |
+| `write_masks_dense(out)` | `bool[n, NUM_ACTIONS]` | one bool per action, for masking logits |
 | `write_actors(out)` | `uint8[n]` | `actor_to_act` per game |
 | `write_status(out)` | `int32[n, STATUS_INTS]` | see `STATUS_FIELDS` |
 | `write_obs(out)` | `float32[n, OBS_SIZE]` | observation from each game's own actor |
@@ -104,6 +108,11 @@ thousands of games therefore needs no per-game Python call at all.
 | `winner` | 1 | winning seat, or `NO_PLAYER` |
 | `turn_count` | 2 | turns played |
 | `current_player` | 3 | turn owner, which during a trade is not the actor |
+| `truncated` | 4 | 1 once `MAX_TURNS` ended the game with no winner |
+
+Output buffers must have exactly the listed dtype and be C-contiguous. Anything
+else raises `TypeError` instead of being converted, because a converted copy
+would receive the data and leave your array untouched.
 
 ```python
 actors = np.zeros(n, dtype=np.uint8)
@@ -114,6 +123,29 @@ games.write_actors(actors)
 games.write_status(status)
 games.write_obs(obs)        # one row per game, from that game's acting seat
 ```
+
+## Rewards and truncation
+
+A game ends when a seat reaches 10 victory points on its own turn, or when it
+reaches 2,000 turns (`MAX_TURNS`), which only happens to games that would never
+end. The second case has no winner and should be treated as a truncation, not
+as a loss for every seat: `Env.truncated`, the `truncated` status column, and
+`GAME_END` with `winner == NO_PLAYER` all report it.
+
+A win/loss reward needs nothing beyond the status row:
+
+```python
+games.step(actions, dones)
+games.write_status(status)
+done = status[:, 0] == 1
+truncated = status[:, 4] == 1
+winner = status[:, 1]
+reward = (winner[:, None] == np.arange(4)) & (done & ~truncated)[:, None]  # [n, 4]
+```
+
+With `step_autoreset` the slot already holds a new game, so read the finished
+game's winner from `last_winner(i)` for each slot where `dones[i]` is set; it
+is `NO_PLAYER` exactly when that game was truncated.
 
 ## Exact chance outcomes
 
@@ -285,6 +317,52 @@ dropped silently — a non-zero value means draining less often, or a larger
 raises while recording is enabled because it plays whole games without entering
 the step loop.
 
+### Event-log files
+
+`fastcatan.events` stores drained rows together with what they cannot say on
+their own: the package version that recorded them, the agents in each seat, and
+run metadata. The file is append-only and still readable after a crash.
+
+```python
+from fastcatan.events import EventWriter, read_events, replay, check_version
+
+with EventWriter("run.fcev", agents=["ppo-v3"] * 4, meta={"run": "a"}) as out:
+    games.enable_log(fastcatan.log.LOG_ALL, capacity_per_env=4096)
+    games.reset()
+    while training:
+        ...
+        games.step_autoreset(actions, dones)
+        out.drain(games)
+        for i in np.flatnonzero(dones):            # agents of the new game in slot i
+            out.assign(i, games.game_id(i), agents=[...])
+
+log = read_events("run.fcev")
+check_version(log)                                 # same fastcatan as the recording
+for game in log.games():                           # one per (env_idx, game_id)
+    env = fastcatan.Env()
+    for action in replay(game, env):
+        ...
+```
+
+`replay` resets an `Env` from the recorded seed and steps the recorded actions.
+Before each step it compares turn, acting seat, victory points, and hand sizes
+with the logged row. It raises `ReplayError` at the first step that differs, or
+when rows are missing because of an overflow. Replays need `LOG_GAMES` and
+`LOG_ACTIONS`.
+
+## Viewer (`fastcatan[viz]`)
+
+The `fastcatan-viz` package, installed by the `viz` extra, holds the detailed
+game-log writer, a converter from event-log files, and a single-file browser
+viewer. None of it is part of the simulator package.
+
+```bash
+fastcatan-viz-convert run.fcev --finished --limit 20   # -> run.jsonl.gz
+fastcatan-viz                                          # open the viewer, drop the file on it
+```
+
+See [`viz/README.md`](viz/README.md).
+
 ## Main API
 
 | Symbol | Purpose |
@@ -306,6 +384,8 @@ the step loop.
 | `EVENT_VERSION` | Event-row layout version |
 | `STATUS_INTS`, `STATUS_FIELDS` | Status-row width and column layout |
 | `log` | Event mask bits and event-type constants |
+| `events` | Event-log files and verified replay |
+| `topology()` | Board adjacency: node IDs per hex, edge, and port |
 
 Snapshots are an internal binary format. Only load snapshots created by the
 same package version; malformed snapshots are rejected.

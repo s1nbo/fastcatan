@@ -15,7 +15,7 @@ more games, each written as
 
 Recording an evaluation game on an ``Env``::
 
-    with GameLogWriter("viz/logs/eval.jsonl.gz") as log:
+    with GameLogWriter("logs/eval.jsonl.gz") as log:
         env.reset(seed)
         rec = log.start_game(env, seed=seed, agents=["ppo-v3", "random", "random", "random"])
         while not env.done:
@@ -31,7 +31,6 @@ from __future__ import annotations
 import gzip
 import json
 import math
-import re
 import warnings
 import zlib
 from pathlib import Path
@@ -51,8 +50,6 @@ FLAG_PLACE_ROAD = 6
 FLAG_TRADE_PENDING = 7
 RESPONSE_DECLINE = 2
 
-TOPOLOGY_HPP = Path(__file__).resolve().parent.parent / "include" / "topology.hpp"
-
 
 def _jsonable(x: Any) -> Any:
     """Agent output as plain JSON: numpy / torch values become numbers or
@@ -70,18 +67,8 @@ def _jsonable(x: Any) -> Any:
 
 
 def _topology() -> dict:
-    """Board adjacency the viewer needs, parsed from include/topology.hpp."""
-    text = TOPOLOGY_HPP.read_text()
-
-    def table(name: str) -> list[list[int]]:
-        m = re.search(rf"\b{name}\s*=\s*\{{\{{(.*?)\}}\}}\s*;", text, re.DOTALL)
-        if not m:
-            raise KeyError(f"{name} not found in {TOPOLOGY_HPP}")
-        return [[int(x, 16) for x in re.findall(r"0x[0-9A-Fa-f]+", body) if int(x, 16) != 0xFF]
-                for body in re.findall(r"\{\{([^{}]*)\}\}", m.group(1))]
-
-    return {"hex_nodes": table("hex_to_node"), "edge_nodes": table("edge_to_node"),
-            "port_nodes": table("port_to_node")}
+    """Board adjacency the viewer needs, from the simulator itself."""
+    return fastcatan.topology()
 
 
 # --- state capture -------------------------------------------------------------
@@ -330,6 +317,8 @@ class GameRecorder:
             self._writer._emit({
                 "kind": "end", "winner": after["winner"], "turns": after["turn"],
                 "steps": self.steps, "vp": [q["vp"] for q in after["players"]],
+                # MAX_TURNS stopped the game: nobody won, nobody lost.
+                "truncated": after["winner"] == NO_PLAYER,
             })
             self._writer.flush()
             self.finished = True

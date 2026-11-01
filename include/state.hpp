@@ -177,4 +177,12 @@ namespace catan {
             : NO_PLAYER;
     }
 
+    // A finished game that MAX_TURNS stopped rather than a player winning.
+    // Training code should treat it as a truncation, not as a loss for every
+    // seat. Equivalent to "ended with no winner": the win check runs before
+    // the length backstop, so a game that reaches both is a win.
+    inline constexpr bool truncated(const GameState& s) noexcept {
+        return s.phase == Phase::ENDED && winner_of(s) == NO_PLAYER;
+    }
+
 }

@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "fastcatan-viz"
+version = "2.2.0"
+description = "Game logs, event-log replay, and a browser viewer for fastcatan"
+readme = "README.md"
+requires-python = ">=3.12"
+license = "MIT"
+# Same release train as the simulator: logs replay only on the version that
+# recorded them, so pin the minor version.
+dependencies = ["fastcatan>=2.2,<2.3"]
+
+[project.urls]
+Homepage = "https://github.com/s1nbo/fastcatan"
+
+[project.scripts]
+fastcatan-viz = "fastcatan_viz:open_viewer"
+fastcatan-viz-convert = "fastcatan_viz.from_events:main_cli"
+fastcatan-viz-demo = "fastcatan_viz.record_demo:main"
+
+[tool.setuptools]
+packages = ["fastcatan_viz"]
+
+[tool.setuptools.package-data]
+fastcatan_viz = ["viewer.html"]

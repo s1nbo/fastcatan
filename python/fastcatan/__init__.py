@@ -29,7 +29,9 @@ from ._fastcatan import (  # noqa: F401
     STATUS_FIELDS,
     action,
     log,
+    topology,
 )
+from . import events  # noqa: E402,F401
 
 __all__ = [
     "BatchedEnv",
@@ -58,6 +60,8 @@ __all__ = [
     "STATUS_FIELDS",
     "action",
     "log",
+    "topology",
+    "events",
 ]
 
 __version__ = _version("fastcatan")

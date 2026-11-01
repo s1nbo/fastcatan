@@ -1,12 +1,11 @@
-#!/usr/bin/env python3
 """Record demo evaluation games as a detailed game log.
 
 Plays `--games` games on ``Env`` with simple random agents and writes every
 step through `gamelog.GameLogWriter`, exactly as an evaluation loop with real
-agents would. Drop the result on ``viz/viewer.html`` to watch it.
+agents would. Open the result in the viewer (``fastcatan-viz``) to watch it.
 
-    python viz/record_demo.py                                  # -> viz/logs/demo.jsonl.gz
-    python viz/record_demo.py --agents builder,builder,random,random --games 2
+    fastcatan-viz-demo                                  # -> logs/demo.jsonl.gz
+    fastcatan-viz-demo --agents builder,builder,random,random --games 2
 
 Agents:
     builder   random legal actions, biased toward building and away from
@@ -21,10 +20,9 @@ from pathlib import Path
 
 import fastcatan
 
-from gamelog import GameLogWriter
+from .gamelog import GameLogWriter
 
 ACT = fastcatan.action
-HERE = Path(__file__).resolve().parent
 
 # Relative weight per action family for the `builder` agent.
 _WEIGHTS = [
@@ -71,7 +69,7 @@ def main() -> None:
                    help="four comma-separated agent kinds, one per seat")
     p.add_argument("--max-steps", type=int, default=50_000,
                    help="actions per game before giving up on it")
-    p.add_argument("--out", type=Path, default=HERE / "logs" / "demo.jsonl.gz")
+    p.add_argument("--out", type=Path, default=Path("logs") / "demo.jsonl.gz")
     args = p.parse_args()
 
     kinds = [k.strip() for k in args.agents.split(",")]

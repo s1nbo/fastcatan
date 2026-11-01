@@ -455,6 +455,16 @@ struct PyEnv {
             throw std::runtime_error("action_mask buffer length mismatch");
         std::memcpy(out.data(), s.action_mask, sizeof(s.action_mask));
     }
+    void action_mask_dense(
+        nb::ndarray<bool, nb::ndim<1>, nb::c_contig,
+                    nb::device::cpu> out) const {
+        require_initialized();
+        if (out.shape(0) != NUM_ACTIONS)
+            throw std::runtime_error("action_mask_dense buffer length mismatch");
+        bool* row = out.data();
+        for (uint32_t a = 0; a < NUM_ACTIONS; ++a)
+            row[a] = (s.action_mask[a >> 6] >> (a & 63)) & 1u;
+    }
 
     nb::list enumerate_outcomes(uint32_t action) const {
         require_initialized();
@@ -571,10 +581,31 @@ NB_MODULE(_fastcatan, m) {
             {"winner",         STATUS_WINNER,         1},
             {"turn_count",     STATUS_TURN_COUNT,     1},
             {"current_player", STATUS_CURRENT_PLAYER, 1},
+            {"truncated",      STATUS_TRUNCATED,      1},
         };
         m.attr("STATUS_FIELDS") = field_dict(
             status_fields, sizeof(status_fields) / sizeof(status_fields[0]));
     }
+
+    m.def("topology", []() {
+        // Board adjacency as plain lists, so tooling outside the repo (the
+        // viewer's log writer) never has to parse topology.hpp.
+        auto rows = [](const auto& table) {
+            nb::list out;
+            for (const auto& entry : table) {
+                nb::list ids;
+                for (uint8_t id : entry)
+                    if (id != 0xFF) ids.append(uint32_t(id));
+                out.append(ids);
+            }
+            return out;
+        };
+        nb::dict d;
+        d["hex_nodes"] = rows(topology::hex_to_node);
+        d["edge_nodes"] = rows(topology::edge_to_node);
+        d["port_nodes"] = rows(topology::port_to_node);
+        return d;
+    }, "Board adjacency: node IDs per hex, per edge, and per port.");
 
     nb::module_ log = m.def_submodule(
         "log", "Event-log mask bits and event-type constants.");
@@ -629,6 +660,9 @@ NB_MODULE(_fastcatan, m) {
         .def_prop_ro("done", &PyEnv::done)
         .def_prop_ro("winner", &PyEnv::winner,
                      "Winning seat, or NO_PLAYER if the game has no winner.")
+        .def_prop_ro("truncated", [](const PyEnv& e) {
+                         e.require_initialized(); return ::catan::truncated(e.s); },
+                     "True once MAX_TURNS ended the game with no winner.")
         .def_prop_ro("robber_hex", [](const PyEnv& e) { e.require_initialized(); return e.s.robber_hex; })
         .def_prop_ro("start_player", [](const PyEnv& e) { e.require_initialized(); return e.s.start_player; })
         .def_prop_ro("free_roads_remaining", [](const PyEnv& e) { e.require_initialized(); return e.s.free_roads_remaining; })
@@ -663,13 +697,16 @@ NB_MODULE(_fastcatan, m) {
         .def("trade_response", &PyEnv::trade_response, nb::arg("seat"))
         .def("legal_actions", &PyEnv::legal_actions,
              "Return the currently legal action IDs.")
-        .def("action_mask", &PyEnv::action_mask, nb::arg("out"),
+        .def("action_mask", &PyEnv::action_mask, nb::arg("out").noconvert(),
              "Copy the legal-action bitset into a uint64[MASK_WORDS] array.")
+        .def("action_mask_dense", &PyEnv::action_mask_dense, nb::arg("out").noconvert(),
+             "Write the legal-action mask as one bool per action into a "
+             "bool[NUM_ACTIONS] array.")
         .def("enumerate_outcomes", &PyEnv::enumerate_outcomes,
              nb::arg("action"),
              "Return exact physical outcomes as (probability, snapshot) pairs. "
              "Deterministic and illegal actions produce one outcome.")
-        .def("write_obs", &PyEnv::obs, nb::arg("pov"), nb::arg("out"),
+        .def("write_obs", &PyEnv::obs, nb::arg("pov"), nb::arg("out").noconvert(),
              "Encode the game from `pov`'s perspective into a float32 buffer "
              "of length OBS_SIZE.")
         .def("state_view", &PyEnv::view, nb::arg("pov"),
@@ -689,6 +726,7 @@ NB_MODULE(_fastcatan, m) {
     using ArrConstU8 = nb::ndarray<const uint8_t, nb::ndim<1>, nb::c_contig, nb::device::cpu>;
     using ArrI32_2D = nb::ndarray<int32_t, nb::ndim<2>, nb::c_contig, nb::device::cpu>;
     using ArrF32_2D = nb::ndarray<float, nb::ndim<2>, nb::c_contig, nb::device::cpu>;
+    using ArrBool_2D = nb::ndarray<bool, nb::ndim<2>, nb::c_contig, nb::device::cpu>;
 
     nb::class_<PyBatchedEnv>(m, "BatchedEnv",
         "A contiguous collection of independent Catan games.")
@@ -707,7 +745,7 @@ NB_MODULE(_fastcatan, m) {
                 throw std::runtime_error("step buffer length mismatch");
             nb::gil_scoped_release release;
             batched_env_step(e.inner, actions.data(), dones.data());
-        }, nb::arg("actions"), nb::arg("dones_out"),
+        }, nb::arg("actions"), nb::arg("dones_out").noconvert(),
         "Step every game and preserve terminal states.")
         .def("step_autoreset", [](PyBatchedEnv& e, ArrU32 actions, ArrU8 dones) {
             e.require_initialized();
@@ -715,7 +753,7 @@ NB_MODULE(_fastcatan, m) {
                 throw std::runtime_error("step buffer length mismatch");
             nb::gil_scoped_release release;
             batched_env_step_autoreset(e.inner, actions.data(), dones.data());
-        }, nb::arg("actions"), nb::arg("dones_out"),
+        }, nb::arg("actions"), nb::arg("dones_out").noconvert(),
         "Step every game and immediately reset terminal slots. Read "
         "last_winner after a reported terminal transition.")
         .def("run_random_games", [](PyBatchedEnv& e, uint64_t num_games) {
@@ -745,14 +783,24 @@ NB_MODULE(_fastcatan, m) {
                 throw std::runtime_error("mask buffer shape mismatch");
             nb::gil_scoped_release release;
             batched_env_write_masks(e.inner, out.data());
-        }, nb::arg("out"))
+        }, nb::arg("out").noconvert(),
+        "Copy each game's legal-action bitset into a uint64[n, MASK_WORDS] array.")
+        .def("write_masks_dense", [](const PyBatchedEnv& e, ArrBool_2D out) {
+            e.require_initialized();
+            if (out.shape(0) != e.inner.n || out.shape(1) != NUM_ACTIONS)
+                throw std::runtime_error("dense mask buffer shape mismatch");
+            nb::gil_scoped_release release;
+            batched_env_write_masks_dense(e.inner, out.data());
+        }, nb::arg("out").noconvert(),
+        "Write each game's legal actions as one bool per action into a "
+        "bool[n, NUM_ACTIONS] array, ready to mask policy logits.")
         .def("write_actors", [](const PyBatchedEnv& e, ArrU8 out) {
             e.require_initialized();
             if (out.shape(0) != e.inner.n)
                 throw std::runtime_error("actor buffer length mismatch");
             nb::gil_scoped_release release;
             batched_env_write_actors(e.inner, out.data());
-        }, nb::arg("out"),
+        }, nb::arg("out").noconvert(),
         "Write the seat that must act in each game into a uint8[n] array.")
         .def("write_status", [](const PyBatchedEnv& e, ArrI32_2D out) {
             e.require_initialized();
@@ -760,7 +808,7 @@ NB_MODULE(_fastcatan, m) {
                 throw std::runtime_error("status buffer shape mismatch");
             nb::gil_scoped_release release;
             batched_env_write_status(e.inner, out.data());
-        }, nb::arg("out"),
+        }, nb::arg("out").noconvert(),
         "Write one int32 row per game into an int32[n, STATUS_INTS] array; "
         "see STATUS_FIELDS for the column layout.")
         .def("write_obs", [](const PyBatchedEnv& e, ArrF32_2D out) {
@@ -769,7 +817,7 @@ NB_MODULE(_fastcatan, m) {
                 throw std::runtime_error("obs buffer shape mismatch");
             nb::gil_scoped_release release;
             batched_env_write_obs(e.inner, out.data());
-        }, nb::arg("out"),
+        }, nb::arg("out").noconvert(),
         "Fill a float32[n, OBS_SIZE] array; row i is env i encoded from its "
         "own actor_to_act's perspective.")
         .def("write_obs_pov", [](const PyBatchedEnv& e, ArrConstU8 seats,
@@ -783,7 +831,7 @@ NB_MODULE(_fastcatan, m) {
                 check_index(seats.data()[index], NUM_PLAYERS, "seat");
             nb::gil_scoped_release release;
             batched_env_write_obs_pov(e.inner, seats.data(), out.data());
-        }, nb::arg("seats"), nb::arg("out"),
+        }, nb::arg("seats"), nb::arg("out").noconvert(),
         "Fill a float32[n, OBS_SIZE] array; row i is env i encoded from "
         "seats[i]'s perspective.")
         .def("enable_log", [](PyBatchedEnv& e, uint32_t mask,
@@ -816,7 +864,7 @@ NB_MODULE(_fastcatan, m) {
                 out.shape(0), std::numeric_limits<uint32_t>::max()));
             nb::gil_scoped_release release;
             return event_log_drain(e.inner.log, e.inner.n, out.data(), rows);
-        }, nb::arg("out"),
+        }, nb::arg("out").noconvert(),
         "Copy pending rows in (env_idx, order) into an int32[cap, EVENT_INTS] "
         "array and clear them; returns the number of rows written. Rows that "
         "do not fit stay queued.")
@@ -923,7 +971,7 @@ NB_MODULE(_fastcatan, m) {
             }
             nb::gil_scoped_release release;
             batched_env_save(e.inner, out.data());
-        }, nb::arg("out"))
+        }, nb::arg("out").noconvert())
         .def("load_snapshots", [](PyBatchedEnv& e, ArrConstU8_2D data) {
             if (data.shape(0) != e.inner.n
                 || data.shape(1) != SNAPSHOT_BYTES) {

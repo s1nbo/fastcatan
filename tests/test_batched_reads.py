@@ -17,9 +17,10 @@ STATUS = {name: offset for name, (offset, _) in fastcatan.STATUS_FIELDS.items()}
 
 
 def test_status_layout_constants() -> None:
-    assert fastcatan.STATUS_INTS == 4
+    assert fastcatan.STATUS_INTS == 5
     assert sorted(STATUS.values()) == list(range(fastcatan.STATUS_INTS))
-    assert set(STATUS) == {"done", "winner", "turn_count", "current_player"}
+    assert set(STATUS) == {"done", "winner", "turn_count", "current_player",
+                           "truncated"}
 
 
 def test_buffer_shapes_are_checked() -> None:
@@ -61,6 +62,9 @@ def test_actors_and_status_match_per_env_getters() -> None:
                 else fastcatan.NO_PLAYER)
             assert row[STATUS["turn_count"]] == batch.turn_count(i)
             assert row[STATUS["current_player"]] == batch.current_player(i)
+            assert row[STATUS["truncated"]] == int(
+                batch.phase(i) == PHASE_ENDED
+                and batch.last_winner(i) == fastcatan.NO_PLAYER)
 
         batch.write_masks(masks)
         for i in range(N):

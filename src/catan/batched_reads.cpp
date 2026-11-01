@@ -7,6 +7,7 @@
 // code layout (about 1% of rollout throughput on GCC with LTO) without any
 // change to the work being done.
 #include "../../include/batched_env.hpp"
+#include "../../include/mask.hpp"
 #include "../../include/obs.hpp"
 
 #include <cstddef>
@@ -32,6 +33,19 @@ void batched_env_write_status(const BatchedEnv& env, int32_t* out) noexcept {
         row[STATUS_WINNER]         = int32_t(winner_of(s));
         row[STATUS_TURN_COUNT]     = int32_t(s.turn_count);
         row[STATUS_CURRENT_PLAYER] = int32_t(s.current_player);
+        row[STATUS_TRUNCATED]      = int32_t(truncated(s));
+    }
+}
+
+void batched_env_write_masks_dense(const BatchedEnv& env, bool* out) noexcept {
+#ifdef FCATAN_HAVE_OPENMP
+    #pragma omp parallel for schedule(static)
+#endif
+    for (int32_t i = 0; i < int32_t(env.n); ++i) {
+        const uint64_t* mask = env.states[i].action_mask;
+        bool* row = out + std::size_t(i) * NUM_ACTIONS;
+        for (uint32_t a = 0; a < NUM_ACTIONS; ++a)
+            row[a] = (mask[a >> 6] >> (a & 63)) & 1u;
     }
 }
 

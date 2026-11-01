@@ -320,7 +320,7 @@ async function loadFiles(files) {
   const perFile = {};
   GAMES.forEach((g, i) => {
     const e = g.end;
-    const res = e ? (e.winner === NO_PLAYER ? "no winner" : `P${e.winner} won in ${e.turns} turns`) : "unfinished";
+    const res = e ? (e.winner === NO_PLAYER ? "truncated (turn limit), no winner" : `P${e.winner} won in ${e.turns} turns`) : "unfinished";
     const file = files.length > 1 ? `${g.source} · ` : "";
     perFile[g.source] = (perFile[g.source] || 0) + 1;
     sel.append(new Option(`${file}Game ${perFile[g.source]} · ${res} · ${g.steps.length} steps`, i));

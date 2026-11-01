@@ -64,13 +64,19 @@ namespace catan {
     // Write actor_to_act for every env. `out` length n.
     void batched_env_write_actors(const BatchedEnv& env, uint8_t* out) noexcept;
 
+    // Write the legal-action mask unpacked to one bool per action, ready to
+    // mask policy logits. `out` length n*NUM_ACTIONS.
+    void batched_env_write_masks_dense(const BatchedEnv& env, bool* out) noexcept;
+
     // Per-env status row: done, winner (NO_PLAYER if none), turn_count,
-    // current_player. `out` length n*STATUS_INTS.
+    // current_player, truncated (ended by MAX_TURNS with no winner).
+    // `out` length n*STATUS_INTS.
     inline constexpr uint32_t STATUS_DONE           = 0;
     inline constexpr uint32_t STATUS_WINNER         = 1;
     inline constexpr uint32_t STATUS_TURN_COUNT     = 2;
     inline constexpr uint32_t STATUS_CURRENT_PLAYER = 3;
-    inline constexpr uint32_t STATUS_INTS           = 4;
+    inline constexpr uint32_t STATUS_TRUNCATED      = 4;
+    inline constexpr uint32_t STATUS_INTS           = 5;
     void batched_env_write_status(const BatchedEnv& env, int32_t* out) noexcept;
 
     // Observations, one row of OBS_SIZE floats per env. `write_obs` uses each

@@ -2,6 +2,32 @@
 
 All notable changes to FastCatan are documented here.
 
+## 2.2.0 - 2026-11-01
+
+Training-loop helpers and replayable event-log files. No rule changes:
+outcomes are identical to 2.1.0 for the same seed and actions.
+
+### Added
+
+- `BatchedEnv.write_masks_dense` and `Env.action_mask_dense` write the legal
+  actions as one bool per action, ready to mask policy logits.
+- `Env.truncated` and a `truncated` status column (`STATUS_INTS` is now 5)
+  mark a game that `MAX_TURNS` ended with no winner.
+- `fastcatan.events`: `EventWriter` stores drained event rows with the
+  recording package version, per-game agents, and run metadata in an
+  append-only file; `read_events`, `check_version`, and `replay` rebuild any
+  recorded game and verify it step by step against the rows.
+- `fastcatan.topology()` returns the board adjacency tables.
+- `fastcatan[viz]` extra, which installs the separate `fastcatan-viz`
+  package: detailed game logs, `fastcatan-viz-convert` from event-log files,
+  and the browser viewer.
+
+### Fixed
+
+- Output buffers with the wrong dtype or a non-contiguous layout now raise
+  `TypeError`. They used to be converted to a temporary copy, so the call
+  succeeded and the caller's array stayed unchanged.
+
 ## 2.1.0 - 2026-10-29
 
 Native observation encoding and event logging for reinforcement-learning

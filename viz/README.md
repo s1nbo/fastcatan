@@ -85,13 +85,37 @@ vanilla JS/SVG file that never touches the network.
 | Shift + ← / → | previous / next turn |
 | Home / End | first / last step |
 | + / − | autoplay speed |
-| s | skip trade-draft and no-op steps |
+| s | cycle the trade filter: all steps · hide drafting · successful trades only |
 | i | node / edge / hex ID overlay |
 
 The view is omniscient: every hand and development card ("new" = bought this
 turn), with public VP next to true VP when they differ. Hover the
 "1 of N legal" note to see the options the actor had. A game stopped by the
 turn limit is labelled truncated.
+
+The **Trades** filter hides trade negotiation. *Hide drafting* drops the
+offer-composing steps and illegal no-ops; *Successful only* also drops opening,
+accepting, declining, and cancelling proposals, keeping just the trades that
+went through. Hidden steps leave the event log and are skipped when stepping
+or playing; the choice is remembered.
+
+Below the board, a victory-point timeline shows each seat's true VP over the
+whole game; hover it for the scores at any step and click to jump there. The
+theme button cycles between following the system, light, and dark.
+
+### Figures for papers
+
+**Export** writes the board or the VP timeline at the current step as a
+standalone SVG (vector, for LaTeX via `\includesvg` or after conversion to PDF)
+or a 4× PNG. Figures always use the light print palette, whatever the page
+theme, and carry no page styling. Each resource tile also has a glyph, so the
+board stays readable in grayscale print. Options in the menu drop the
+current-move highlight from the board or the step cursor from the timeline.
+Files are named `catan_game<N>_step<S>_board.svg` and so on.
+
+Player colours (red, blue, orange, magenta) were checked for colour-vision
+deficiency separation in both themes, and every player name is printed next to
+its colour, never in colour alone.
 
 ## Game-log format (version 1)
 

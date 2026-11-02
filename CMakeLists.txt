@@ -48,6 +48,7 @@ add_library(fastcatan_core STATIC
     src/catan/obs.cpp
     src/catan/batched_reads.cpp
     src/catan/event_log.cpp
+    src/catan/determinize.cpp
 )
 target_include_directories(fastcatan_core PUBLIC include)
 target_compile_options(fastcatan_core PRIVATE

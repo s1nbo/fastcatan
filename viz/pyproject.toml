@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "fastcatan-viz"
-version = "2.2.1"
+version = "2.2.2"
 description = "Game logs, event-log replay, and a browser viewer for fastcatan"
 readme = "README.md"
 requires-python = ">=3.12"

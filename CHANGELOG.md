@@ -2,6 +2,18 @@
 
 All notable changes to FastCatan are documented here.
 
+## 2.2.2 - 2026-11-02
+
+### Added
+
+- `Env.determinize(pov, seed)` (C++: `catan::determinize`) resamples
+  everything `pov` cannot see for search over hidden information: opponent
+  resources, opponent development cards, and the deck, uniformly among states
+  consistent with `pov`'s information. It also reseeds the random-number state,
+  so a search no longer sees the real future dice and development draws that a
+  `snapshot()` copy carries. It only runs on an `Env` restored with
+  `load_snapshot()`.
+
 ## 2.2.1 - 2026-11-02
 
 Packaging only; the simulator is identical to 2.2.0.

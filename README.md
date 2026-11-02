@@ -170,6 +170,36 @@ to one. Each successor also advances its stored random-number state exactly as
 a sampled transition would. This keeps Catan's probability rules in the
 simulator while leaving any decision-making logic to downstream packages.
 
+## Determinization
+
+Search over hidden information (ISMCTS, PIMC) needs states that agree with
+what one seat knows and nothing more. A plain `snapshot()` copy holds the
+opponents' real hands, the real development deck, and the real random-number
+state, so it also knows the future dice. `determinize(pov, seed)` replaces all
+of that on a scratch copy:
+
+```python
+scratch = fastcatan.Env()
+scratch.load_snapshot(game.snapshot())
+scratch.determinize(pov, seed)
+```
+
+- Opponent resource cards are pooled and redealt, keeping every hand size.
+  During an open trade the proposer keeps the offered cards and each responder
+  who accepted keeps the requested cards, since both are public commitments.
+- Opponent development cards (held, bought this turn, victory points) are
+  pooled with the deck and redealt, keeping each opponent's held and
+  bought-this-turn counts. Deals that would put an opponent at 10 VP are
+  redrawn.
+- An opponent's unopened trade draft is cleared.
+- The random-number state is reseeded from `seed`.
+
+Everything `pov` can see, including its own cards, the board, the bank, and
+every public count, is unchanged; `write_obs(pov)` returns the same floats
+before and after. The result depends only on the state, `pov`, and `seed`. It
+raises on an `Env` that was not restored with `load_snapshot()`, so a live game
+cannot be overwritten by mistake.
+
 ## Player-visible state
 
 `state_view(seat)` returns unnormalized semantic data for a player. It includes
@@ -374,7 +404,7 @@ See [`viz/README.md`](viz/README.md).
 
 | Symbol | Purpose |
 |---|---|
-| `Env` | One game: reset, inspect, list legal actions, step, snapshot, restore |
+| `Env` | One game: reset, inspect, list legal actions, step, snapshot, restore, determinize |
 | `BatchedEnv` | Contiguous collection of independently progressing games |
 | `action` | Action-ID constants |
 | `NUM_ACTIONS`, `MASK_WORDS` | Legal-action bitset dimensions |

@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "batched_env.hpp"
+#include "determinize.hpp"
 #include "event_log.hpp"
 #include "mask.hpp"
 #include "obs.hpp"
@@ -320,6 +321,9 @@ struct PyEnv {
     GameState s{};
     BoardLayout b{};
     bool initialized = false;
+    // Set by load_snapshot, cleared by reset: determinize rewrites hidden
+    // state, so it only runs on a restored scratch copy.
+    bool scratch = false;
 
     void require_initialized() const {
         if (!initialized)
@@ -337,6 +341,7 @@ struct PyEnv {
     void reset(uint64_t seed) noexcept {
         reset_one(s, b, seed);
         initialized = true;
+        scratch = false;
     }
     bool step(uint32_t action) {
         require_initialized();
@@ -442,6 +447,16 @@ struct PyEnv {
         s = next_state;
         b = next_layout;
         initialized = true;
+        scratch = true;
+    }
+    void determinize(uint32_t pov, uint64_t seed) {
+        require_initialized();
+        check_index(pov, NUM_PLAYERS, "pov");
+        if (!scratch)
+            throw std::runtime_error(
+                "determinize rewrites hidden state; call it on a scratch Env "
+                "restored with load_snapshot(), never on the live game");
+        ::catan::determinize(s, b, uint8_t(pov), seed);
     }
     void reseed(uint64_t seed) {
         require_initialized();
@@ -715,7 +730,12 @@ NB_MODULE(_fastcatan, m) {
         .def("snapshot", &PyEnv::snapshot)
         .def("load_snapshot", &PyEnv::load_snapshot, nb::arg("data"),
              "Restore and validate a snapshot produced by this package version.")
-        .def("reseed", &PyEnv::reseed, nb::arg("seed"));
+        .def("reseed", &PyEnv::reseed, nb::arg("seed"))
+        .def("determinize", &PyEnv::determinize, nb::arg("pov"), nb::arg("seed"),
+             "Resample everything `pov` cannot see (opponent hands, opponent "
+             "development cards, the deck) uniformly among states consistent "
+             "with pov's information, and reseed the RNG from `seed`. Only "
+             "valid on a scratch Env restored with load_snapshot().");
 
     using ArrU32 = nb::ndarray<const uint32_t, nb::ndim<1>, nb::c_contig, nb::device::cpu>;
     using ArrU8 = nb::ndarray<uint8_t, nb::ndim<1>, nb::c_contig, nb::device::cpu>;

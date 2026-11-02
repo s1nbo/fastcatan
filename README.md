@@ -15,13 +15,19 @@ through [nanobind](https://github.com/wjakob/nanobind).
 - Batched observation, actor, and status reads that need no per-game calls.
 - An opt-in native event log for trades, actions, and game boundaries, with a
   versioned file format that replays any recorded game exactly.
-- Optional game-log viewer, shipped separately: `pip install fastcatan[viz]`.
+- A game-log viewer in this repository (`viz/`), installed separately.
 
 ## Install
 
 ```bash
-pip install fastcatan          # simulator only (depends on NumPy)
-pip install fastcatan[viz]     # plus game logs and the browser viewer
+pip install fastcatan
+```
+
+The simulator depends only on NumPy. The optional game-log viewer is not on
+PyPI; install it from the repository (it needs nothing beyond `fastcatan`):
+
+```bash
+pip install "fastcatan-viz @ git+https://github.com/s1nbo/fastcatan#subdirectory=viz"
 ```
 
 Prebuilt wheels target Linux x86_64 and macOS Apple Silicon on CPython 3.12+.
@@ -350,11 +356,12 @@ with the logged row. It raises `ReplayError` at the first step that differs, or
 when rows are missing because of an overflow. Replays need `LOG_GAMES` and
 `LOG_ACTIONS`.
 
-## Viewer (`fastcatan[viz]`)
+## Viewer (`viz/`)
 
-The `fastcatan-viz` package, installed by the `viz` extra, holds the detailed
-game-log writer, a converter from event-log files, and a single-file browser
-viewer. None of it is part of the simulator package.
+The `fastcatan-viz` package in `viz/` holds the detailed game-log writer, a
+converter from event-log files, and a single-file browser viewer. None of it
+is part of the simulator package, and it is not published to PyPI; install it
+from the repository as shown under Install.
 
 ```bash
 fastcatan-viz-convert run.fcev --finished --limit 20   # -> run.jsonl.gz

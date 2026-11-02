@@ -1,6 +1,7 @@
 """Game logs and a browser viewer for fastcatan.
 
-Kept out of the core simulator; install with ``pip install fastcatan[viz]``.
+Kept out of the core simulator and off PyPI; install from the repository:
+``pip install "fastcatan-viz @ git+https://github.com/s1nbo/fastcatan#subdirectory=viz"``.
 
 - `GameLogWriter` / `read_game_log`: detailed per-step game logs (JSONL).
 - ``fastcatan-viz-convert``: native event-log file -> game log, by replay.

@@ -247,7 +247,7 @@ def test_converter_writes_viewer_logs(tmp_path: Path) -> None:
     path = tmp_path / "run.fcev"
     out = tmp_path / "run.jsonl.gz"
     _random_batch_run(3, 6000, seed=17, path=path)
-    viz = pytest.importorskip("fastcatan_viz", reason="pip install fastcatan[viz]")
+    viz = pytest.importorskip("fastcatan_viz", reason="pip install ./viz")
     subprocess.run([sys.executable, "-m", "fastcatan_viz.from_events", str(path),
                     "-o", str(out), "--finished"], check=True, capture_output=True)
     read_game_log = viz.read_game_log

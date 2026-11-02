@@ -2,6 +2,21 @@
 
 All notable changes to FastCatan are documented here.
 
+## 2.2.1 - 2026-11-02
+
+Packaging only; the simulator is identical to 2.2.0.
+
+### Changed
+
+- Removed the `viz` extra. `fastcatan-viz` stays in the repository and is not
+  published to PyPI; install it with
+  `pip install "fastcatan-viz @ git+https://github.com/s1nbo/fastcatan#subdirectory=viz"`.
+- Releases build macOS wheels on `macos-15` (the `macos-14` image is retired).
+
+### Fixed
+
+- 2.2.0 was published without its source distribution; 2.2.1 includes one.
+
 ## 2.2.0 - 2026-11-01
 
 Training-loop helpers and replayable event-log files. No rule changes:
@@ -18,9 +33,8 @@ outcomes are identical to 2.1.0 for the same seed and actions.
   append-only file; `read_events`, `check_version`, and `replay` rebuild any
   recorded game and verify it step by step against the rows.
 - `fastcatan.topology()` returns the board adjacency tables.
-- `fastcatan[viz]` extra, which installs the separate `fastcatan-viz`
-  package: detailed game logs, `fastcatan-viz-convert` from event-log files,
-  and the browser viewer.
+- `viz/` becomes the separate `fastcatan-viz` package: detailed game logs,
+  `fastcatan-viz-convert` from event-log files, and the browser viewer.
 
 ### Fixed
 

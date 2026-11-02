@@ -1,12 +1,13 @@
 # fastcatan-viz — game logs and viewer
 
 Game logs, event-log replay, and a browser viewer for
-[fastcatan](https://github.com/s1nbo/fastcatan). This is a separate
-distribution so the simulator package carries none of it:
+[fastcatan](https://github.com/s1nbo/fastcatan). It is a separate package so
+the simulator carries none of it, and it lives only in this repository (not on
+PyPI):
 
 ```bash
-pip install fastcatan[viz]     # from PyPI
-pip install ./viz              # from a checkout, after `pip install .`
+pip install "fastcatan-viz @ git+https://github.com/s1nbo/fastcatan#subdirectory=viz"
+pip install ./viz              # from a checkout
 ```
 
 It has no dependencies beyond `fastcatan` and the standard library, and is

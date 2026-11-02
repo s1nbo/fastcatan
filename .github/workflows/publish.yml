@@ -101,30 +101,11 @@ jobs:
           name: cibw-sdist
           path: dist/*.tar.gz
 
-  build_viz:
-    name: fastcatan-viz
-    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
-    needs: verify
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
-        with:
-          python-version: "3.12"
-      - name: Build fastcatan-viz wheel + sdist
-        run: |
-          python -m pip install build
-          python -m build viz --outdir dist
-      - uses: actions/upload-artifact@v4
-        with:
-          name: cibw-viz
-          path: dist/*
-
   publish:
     name: publish to PyPI
     # only on a tag, and only after wheel + sdist succeed
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
-    needs: [verify, build_wheels, build_sdist, build_viz]
+    needs: [verify, build_wheels, build_sdist]
     runs-on: ubuntu-latest
     environment: pypi
     permissions:

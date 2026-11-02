@@ -4,7 +4,7 @@ build-backend = "scikit_build_core.build"
 
 [project]
 name = "fastcatan"
-version = "2.2.0"
+version = "2.2.1"
 description = "High-throughput Catan simulator with Python bindings"
 readme = "README.md"
 # nanobind STABLE_ABI (abi3) requires CPython 3.12+: one wheel covers 3.12/3.13/3.14.
@@ -24,11 +24,6 @@ classifiers = [
     "Topic :: Games/Entertainment :: Board Games",
 ]
 
-[project.optional-dependencies]
-# Game logs, event-log replay, and the browser viewer live in their own
-# distribution (viz/), so the core simulator carries none of it.
-viz = ["fastcatan-viz==2.2.0"]
-
 [project.urls]
 Homepage = "https://github.com/s1nbo/fastcatan"
 Repository = "https://github.com/s1nbo/fastcatan"
@@ -40,8 +35,8 @@ cmake.version = ">=3.27"
 cmake.build-type = "Release"
 build-dir = "build/{wheel_tag}"
 wheel.packages = ["python/fastcatan"]
-# viz/ is the separate fastcatan-viz distribution (pip install fastcatan[viz]);
-# keep it out of this package's wheel and sdist.
+# viz/ is the separate fastcatan-viz package, installed from the repo and not
+# published to PyPI; keep it out of this package's wheel and sdist.
 sdist.exclude = ["viz/"]
 # nanobind STABLE_ABI -> tag the wheel abi3 (cp312-abi3), so one build serves 3.12+.
 wheel.py-api = "cp312"

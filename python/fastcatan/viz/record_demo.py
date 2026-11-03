@@ -2,10 +2,10 @@
 
 Plays `--games` games on ``Env`` with simple random agents and writes every
 step through `gamelog.GameLogWriter`, exactly as an evaluation loop with real
-agents would. Open the result in the viewer (``fastcatan-viz``) to watch it.
+agents would. Open the result in the viewer (``fastcatan view``) to watch it.
 
-    fastcatan-viz-demo                                  # -> logs/demo.jsonl.gz
-    fastcatan-viz-demo --agents builder,builder,random,random --games 2
+    fastcatan demo                                  # -> logs/demo.jsonl.gz
+    fastcatan demo --agents builder,builder,random,random --games 2
 
 Agents:
     builder   random legal actions, biased toward building and away from
@@ -61,21 +61,25 @@ class RandomAgent:
         return self.rng.choices(legal, weights=[WEIGHTS[a] for a in legal])[0]
 
 
-def main() -> None:
-    p = argparse.ArgumentParser(description="Record demo evaluation games as a detailed game log.")
+def _agent_kinds(text: str) -> list[str]:
+    kinds = [k.strip() for k in text.split(",")]
+    if len(kinds) != 4 or any(k not in ("builder", "random") for k in kinds):
+        raise argparse.ArgumentTypeError("needs four of: builder, random")
+    return kinds
+
+
+def add_arguments(p: argparse.ArgumentParser) -> None:
     p.add_argument("--games", type=int, default=4)
     p.add_argument("--seed", type=int, default=42)
-    p.add_argument("--agents", default="builder,builder,builder,builder",
+    p.add_argument("--agents", type=_agent_kinds, default="builder,builder,builder,builder",
                    help="four comma-separated agent kinds, one per seat")
     p.add_argument("--max-steps", type=int, default=50_000,
                    help="actions per game before giving up on it")
     p.add_argument("--out", type=Path, default=Path("logs") / "demo.jsonl.gz")
-    args = p.parse_args()
 
-    kinds = [k.strip() for k in args.agents.split(",")]
-    if len(kinds) != 4 or any(k not in ("builder", "random") for k in kinds):
-        p.error("--agents needs four of: builder, random")
 
+def run(args: argparse.Namespace) -> int:
+    kinds = args.agents
     rng = random.Random(args.seed)
     env = fastcatan.Env()
     with GameLogWriter(args.out) as log:
@@ -94,7 +98,4 @@ def main() -> None:
             result = f"P{env.winner} wins" if env.done else "unfinished"
             print(f"game {g}: {result} in {env.turn_count} turns, {rec.steps} steps, vp {vps}")
     print(f"wrote {args.out}  ({args.out.stat().st_size / 1024:.0f} KiB)")
-
-
-if __name__ == "__main__":
-    main()
+    return 0

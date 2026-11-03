@@ -323,7 +323,7 @@ details.menu .pop hr { border: 0; border-top: 1px solid var(--line); margin: 4px
         <svg viewBox="0 0 24 24"><polygon points="12,1 22,6.5 22,17.5 12,23 2,17.5 2,6.5" fill="var(--ore)"/></svg>
       </div>
       <h2>Drop a game log here</h2>
-      <p>or use <b>Open log…</b> — <code>.jsonl</code> or <code>.jsonl.gz</code> written by <code>fastcatan_viz.GameLogWriter</code>.</p>
+      <p>or use <b>Open log…</b> — <code>.jsonl</code> or <code>.jsonl.gz</code> written by <code>fastcatan.viz.GameLogWriter</code>.</p>
       <p>Everything shown comes from the log itself; no simulator or agent is needed.</p>
     </div>
   </div>
@@ -490,7 +490,7 @@ async function readText(blob) {
     return { text: text + decoder.decode(), cut: false };
   }
   if (String.fromCharCode(...head.slice(0, 7)) === "FCEVLOG") {
-    throw new Error("this is a native event-log file (.fcev); convert it first: fastcatan-viz-convert <file>");
+    throw new Error("this is a native event-log file (.fcev); convert it first: fastcatan convert <file>");
   }
   return { text: await blob.text(), cut: false };
 }

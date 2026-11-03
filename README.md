@@ -15,7 +15,7 @@ through [nanobind](https://github.com/wjakob/nanobind).
 - Batched observation, actor, and status reads that need no per-game calls.
 - An opt-in native event log for trades, actions, and game boundaries, with a
   versioned file format that replays any recorded game exactly.
-- A game-log viewer in this repository (`viz/`), installed separately.
+- Detailed game logs and a single-file browser viewer.
 
 ## Install
 
@@ -23,12 +23,7 @@ through [nanobind](https://github.com/wjakob/nanobind).
 pip install fastcatan
 ```
 
-The simulator depends only on NumPy. The optional game-log viewer is not on
-PyPI; install it from the repository (it needs nothing beyond `fastcatan`):
-
-```bash
-pip install "fastcatan-viz @ git+https://github.com/s1nbo/fastcatan#subdirectory=viz"
-```
+The package depends only on NumPy.
 
 Prebuilt wheels target Linux x86_64 and macOS Apple Silicon on CPython 3.12+.
 Other supported systems build from the source distribution and need a C++23
@@ -386,19 +381,132 @@ with the logged row. It raises `ReplayError` at the first step that differs, or
 when rows are missing because of an overflow. Replays need `LOG_GAMES` and
 `LOG_ACTIONS`.
 
-## Viewer (`viz/`)
+## Game logs and viewer
 
-The `fastcatan-viz` package in `viz/` holds the detailed game-log writer, a
-converter from event-log files, and a single-file browser viewer. None of it
-is part of the simulator package, and it is not published to PyPI; install it
-from the repository as shown under Install.
+`fastcatan.viz` writes detailed per-step game logs and ships a single-file
+browser viewer for them. The `fastcatan` command drives it:
 
 ```bash
-fastcatan-viz-convert run.fcev --finished --limit 20   # -> run.jsonl.gz
-fastcatan-viz                                          # open the viewer, drop the file on it
+fastcatan view                          # open the viewer
+fastcatan convert run.fcev --finished   # event-log file -> viewer game log
+fastcatan demo                          # record demo games to logs/demo.jsonl.gz
 ```
 
-See [`viz/README.md`](viz/README.md).
+There are two ways to get a game into the viewer:
+
+| Source | Contains | Use for |
+|---|---|---|
+| `fastcatan.events.EventWriter` file (`.fcev`) | seed + actions per game, compact | training runs: log everything, look at a few games later |
+| `GameLogWriter` file (`.jsonl.gz`) | full state per step, plus optional agent output | evaluation games, where you want values / policies shown |
+
+The viewer reads only `.jsonl` / `.jsonl.gz`. Convert an event-log file first;
+the converter replays the games through the simulator. No agents or
+checkpoints are involved either way, so a log stays viewable after the models
+are gone. A log replays only on the fastcatan version that recorded it.
+
+### Converting training logs
+
+```bash
+fastcatan convert run.fcev --list                       # games in the file
+fastcatan convert run.fcev --finished --limit 20        # -> run.jsonl.gz
+fastcatan convert run.fcev --env 3 --game 7 -o one.jsonl.gz
+```
+
+The converter refuses a file recorded with another fastcatan version (pass
+`--allow-version-mismatch` to try anyway). Every step is checked against the
+recorded rows. A game that diverges, or lost rows to a log overflow, is
+skipped with a message instead of being written halfway. Agents and metadata
+assigned with `EventWriter(agents=..., meta=...)` or `assign(...)` appear in the
+viewer, together with a `source` entry pointing back to the file, slot, and
+game.
+
+### Logging evaluation games
+
+```python
+from fastcatan.viz import GameLogWriter
+
+with GameLogWriter("logs/eval.jsonl.gz") as log:          # any number of games per file
+    for seed in seeds:
+        env.reset(seed)
+        rec = log.start_game(env, seed=seed, agents=["ppo-v3", "random", "random", "random"],
+                             meta={"checkpoint": "ckpt_120.zip"})
+        while not env.done:
+            action = agents[env.actor_to_act].act(env)
+            env.step(action)
+            rec.record(action, info={"value": 0.31})         # always right after the step
+```
+
+- **BatchedEnv**: `log.start_game(batch, env_idx=i, ...)` (the seed is read from
+  the slot), then `rec.record(actions[i])` after each `batch.step(...)`. Use
+  `step`, not `step_autoreset`, so the slot is not replaced mid-log.
+- **Agent output**: `info` is a free-form dict shown under the current move.
+  NumPy and torch values are converted, and NaN / inf are stored as strings.
+- **Killed runs**: each finished game is flushed to disk, so a run that dies
+  midway keeps every completed game; the viewer and `read_game_log` load a
+  cut-off file up to the cut and say so.
+- Cost: about 50 µs per step; a 1,000-step game is roughly 30 KB gzipped.
+
+`fastcatan demo` records 4 demo games with simple random agents into
+`logs/demo.jsonl.gz`.
+
+### Viewer
+
+`fastcatan view` opens the bundled `viewer.html` in a browser (it also prints
+the path; `fastcatan.viz.viewer_path()` returns it). Drop one or more
+`.jsonl` / `.jsonl.gz` logs on it, or use **Open log…**. It is a single
+vanilla JS/SVG file that never touches the network.
+
+| Key | Action |
+|---|---|
+| Space | play / pause |
+| ← / → | step back / forward |
+| Shift + ← / → | previous / next turn |
+| Home / End | first / last step |
+| + / − | autoplay speed |
+| s | cycle the trade filter: all steps · hide drafting · successful trades only |
+| i | node / edge / hex ID overlay |
+
+The view is omniscient: every hand and development card ("new" = bought this
+turn), with public VP next to true VP when they differ. Hover the
+"1 of N legal" note to see the options the actor had. A game stopped by the
+turn limit is labelled truncated.
+
+The **Trades** filter hides trade negotiation. *Hide drafting* drops the
+offer-composing steps and illegal no-ops; *Successful only* also drops opening,
+accepting, declining, and cancelling proposals, keeping just the trades that
+went through. Hidden steps leave the event log and are skipped when stepping
+or playing; the choice is remembered.
+
+Below the board, a victory-point timeline shows each seat's true VP over the
+whole game; hover it for the scores at any step and click to jump there. The
+theme button cycles between following the system, light, and dark.
+
+**Export** writes the board or the VP timeline at the current step as a
+standalone SVG (vector, for LaTeX via `\includesvg` or after conversion to PDF)
+or a 4× PNG. Figures always use the light print palette, whatever the page
+theme, and carry no page styling. Each resource tile also has a glyph, so the
+board stays readable in grayscale print. Options in the menu drop the
+current-move highlight from the board or the step cursor from the timeline.
+Files are named `catan_game<N>_step<S>_board.svg` and so on.
+
+Player colours (red, blue, orange, magenta) were checked for colour-vision
+deficiency separation in both themes, and every player name is printed next to
+its colour, never in colour alone.
+
+### Game-log format (version 1)
+
+| Record | Fields |
+|---|---|
+| `game` | `format`, `version`, `fastcatan`, `seed` (string), `agents[4]`, `meta`, `board` (hex resources/numbers, port types), `topology`, `action_names`, `state` |
+| `step` | `i`, `actor`, `action`, `name`, `type`, `text`, `legal`, `hl`?, `info`?, `warnings`?, `state` |
+| `end` | `winner`, `turns`, `steps`, `vp[4]`, `truncated` (absent if the game did not finish) |
+
+`state` holds turn, phase, flag, current/acting seat, dice, robber, awards, dev
+deck size, bank, `nodes` (54 chars: `.`, `a`–`d` settlement, `A`–`D` city by
+seat), `edges` (72 chars: `.` or seat), the open trade, and per seat VP, public
+VP, resources, dev cards (`dev` playable, `dev_new` bought this turn), knights,
+road length, pieces left, cards owed to a discard, and port bits.
+`fastcatan.viz.read_game_log(path)` loads a file back in Python.
 
 ## Main API
 
@@ -422,6 +530,7 @@ See [`viz/README.md`](viz/README.md).
 | `STATUS_INTS`, `STATUS_FIELDS` | Status-row width and column layout |
 | `log` | Event mask bits and event-type constants |
 | `events` | Event-log files and verified replay |
+| `viz` | Detailed game logs and the browser viewer |
 | `topology()` | Board adjacency: node IDs per hex, edge, and port |
 
 Snapshots are an internal binary format. Only load snapshots created by the

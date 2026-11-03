@@ -7,10 +7,10 @@ rows, and writes them with `gamelog.GameLogWriter`. No agents or checkpoints
 are involved; the replay needs only the fastcatan version that recorded the
 file.
 
-    fastcatan-viz-convert run.fcev                        # every game -> run.jsonl.gz
-    fastcatan-viz-convert run.fcev --finished --limit 20  # first 20 finished games
-    fastcatan-viz-convert run.fcev --env 3 --game 7 -o one.jsonl.gz
-    fastcatan-viz-convert run.fcev --list                 # what is in the file
+    fastcatan convert run.fcev                        # every game -> run.jsonl.gz
+    fastcatan convert run.fcev --finished --limit 20  # first 20 finished games
+    fastcatan convert run.fcev --env 3 --game 7 -o one.jsonl.gz
+    fastcatan convert run.fcev --list                 # what is in the file
 
 Agent output (values, policies) is not in the native rows; log evaluation
 games with `GameLogWriter` directly when you want it in the viewer.
@@ -35,8 +35,7 @@ def _result(game) -> str:
     return f"P{game.winner} won"
 
 
-def main() -> int:
-    p = argparse.ArgumentParser(description="Convert an event-log file into a viewer game log.")
+def add_arguments(p: argparse.ArgumentParser) -> None:
     p.add_argument("path", type=Path)
     p.add_argument("-o", "--out", type=Path,
                    help="output .jsonl / .jsonl.gz (default: next to the input)")
@@ -48,8 +47,9 @@ def main() -> int:
     p.add_argument("--allow-version-mismatch", action="store_true",
                    help="replay with a different fastcatan than the one that recorded "
                         "the file; a divergence is still detected and reported")
-    args = p.parse_args()
 
+
+def run(args: argparse.Namespace) -> int:
     log = read_events(args.path)
     games = [g for g in log.games()
              if (args.env is None or g.env_idx == args.env)
@@ -109,11 +109,3 @@ def main() -> int:
             print(f"env {g.env_idx} game {g.game_id}: {_result(g)}, {rec.steps} steps")
     print(f"wrote {written} game(s) to {out}" + (f", skipped {failed}" if failed else ""))
     return 0 if written else 1
-
-
-def main_cli() -> None:
-    sys.exit(main())
-
-
-if __name__ == "__main__":
-    main_cli()

@@ -2,7 +2,9 @@
 
 All notable changes to FastCatan are documented here.
 
-## 2.2.2 - 2026-11-02
+## 2.2.3 - 2026-11-03
+
+2.2.2 was never published; its changes ship here.
 
 ### Added
 
@@ -13,6 +15,19 @@ All notable changes to FastCatan are documented here.
   so a search no longer sees the real future dice and development draws that a
   `snapshot()` copy carries. It only runs on an `Env` restored with
   `load_snapshot()`.
+- Viewer: a three-way trade filter (all steps, hide drafting, successful
+  trades only), a victory-point timeline below the board, a light / dark /
+  system theme switch, and SVG / PNG export of the board and timeline for
+  papers.
+
+### Changed
+
+- Game logs and the viewer are part of `fastcatan`: `fastcatan_viz` is now
+  `fastcatan.viz`, loaded with `import fastcatan`, and `pip install fastcatan`
+  includes it. The separate `fastcatan-viz` package is gone.
+- One `fastcatan` command replaces the three viewer scripts: `fastcatan view`
+  (was `fastcatan-viz`), `fastcatan convert` (was `fastcatan-viz-convert`),
+  and `fastcatan demo` (was `fastcatan-viz-demo`).
 
 ## 2.2.1 - 2026-11-02
 

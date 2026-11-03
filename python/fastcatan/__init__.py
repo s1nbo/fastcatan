@@ -31,7 +31,7 @@ from ._fastcatan import (  # noqa: F401
     log,
     topology,
 )
-from . import events  # noqa: E402,F401
+from . import events, viz  # noqa: E402,F401
 
 __all__ = [
     "BatchedEnv",
@@ -62,6 +62,7 @@ __all__ = [
     "log",
     "topology",
     "events",
+    "viz",
 ]
 
 __version__ = _version("fastcatan")

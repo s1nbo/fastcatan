@@ -12,6 +12,7 @@ import pytest
 import fastcatan
 from fastcatan.events import (EventWriter, ReplayError, check_version, read_events,
                               replay)
+from fastcatan.viz import read_game_log, viewer_path
 from tests.conftest import legal_actions
 
 ACT = fastcatan.action
@@ -243,14 +244,16 @@ def test_writer_validates_input(tmp_path: Path) -> None:
 
 # --- conversion to the viewer format ---------------------------------------------
 
+def test_viewer_ships_in_the_package() -> None:
+    assert viewer_path().is_file()
+
+
 def test_converter_writes_viewer_logs(tmp_path: Path) -> None:
     path = tmp_path / "run.fcev"
     out = tmp_path / "run.jsonl.gz"
     _random_batch_run(3, 6000, seed=17, path=path)
-    viz = pytest.importorskip("fastcatan_viz", reason="pip install ./viz")
-    subprocess.run([sys.executable, "-m", "fastcatan_viz.from_events", str(path),
+    subprocess.run([sys.executable, "-m", "fastcatan", "convert", str(path),
                     "-o", str(out), "--finished"], check=True, capture_output=True)
-    read_game_log = viz.read_game_log
     logged = read_game_log(out)
     finished = [g for g in read_events(path).games() if g.finished]
     assert len(logged) == len(finished) > 0

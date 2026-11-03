@@ -34,14 +34,9 @@ jobs:
             echo "Tag v$TAG_VERSION does not match package version $PACKAGE_VERSION"
             exit 1
           }
-          VIZ_VERSION="$(python -c 'import tomllib; print(tomllib.load(open("viz/pyproject.toml", "rb"))["project"]["version"])')"
-          test "$VIZ_VERSION" = "$PACKAGE_VERSION" || {
-            echo "fastcatan-viz $VIZ_VERSION does not match fastcatan $PACKAGE_VERSION"
-            exit 1
-          }
       - name: Install and run Python tests
         run: |
-          python -m pip install . ./viz pytest
+          python -m pip install . pytest
           python -m pytest
       - name: Build and run standalone C++ tests
         run: |

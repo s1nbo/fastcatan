@@ -25,6 +25,9 @@ __pycache__/
 venv/
 .pytest_cache/
 
+# recorded game logs (fastcatan-viz-demo writes logs/demo.jsonl.gz)
+logs/
+
 # editors / os
 .vscode/
 .idea/
